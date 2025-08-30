@@ -1,0 +1,14 @@
+// Test Case 4: Arrays and Pointers with Lexical Errors
+#include <iostream>
+using namespace std;
+
+int main() {
+    int array@size = 5;  
+    char ch = 'A;
+    
+    int arr[5] = {10, 20, 30, 40, 50};
+    int* ptr = arr;
+    *ptr = 15;
+    
+    return 0;
+}

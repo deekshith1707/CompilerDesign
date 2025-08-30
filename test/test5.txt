@@ -1,0 +1,37 @@
+// Test Case 5: Structures, Enums and Unions
+#include <iostream>
+using namespace std;
+
+struct Point {
+    int x;
+    int y;
+};
+
+enum Color {
+    RED,
+    GREEN,
+    BLUE
+};
+
+union Data {
+    int i;
+    float f;
+    char c;
+};
+
+int main() {
+    Point p1;
+    p1.x = 10;
+    p1.y = 20;
+    
+    Color myColor = RED;
+    
+    Data data;
+    data.i = 10;
+    data.f = 3.14;
+    
+    typedef int Integer;
+    Integer num = 42;
+    
+    return 0;
+}

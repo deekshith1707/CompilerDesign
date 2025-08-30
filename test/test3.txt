@@ -1,0 +1,30 @@
+// Test Case 3: Loops (for, while, do-while, until)
+#include <iostream>
+using namespace std;
+
+int main() {
+    int sum = 0;
+    
+    for (int i = 0; i < 5; i++) {
+        sum += i;
+    }
+    
+    int j = 0;
+    while (j < 5) {
+        sum += j;
+        j++;
+    }
+    
+    int k = 0;
+    do {
+        sum += k;
+        k++;
+    } while (k < 5);
+    
+    int m = 10;
+    until (m < 5) {
+        m--;
+    }
+    
+    return 0;
+}

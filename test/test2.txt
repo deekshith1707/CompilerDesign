@@ -1,0 +1,26 @@
+// Test Case 2: Control Structures (if-else, switch)
+#include <iostream>
+using namespace std;
+
+int main() {
+    int x = 10;
+    
+    if (x > 5) {
+        x = x + 1;
+    } else {
+        x = x - 1;
+    }
+    
+    switch (x) {
+        case 9:
+            x = 100;
+            break;
+        case 11:
+            x = 200;
+            break;
+        default:
+            x = 300;
+    }
+    
+    return 0;
+}

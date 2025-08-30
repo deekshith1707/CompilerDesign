@@ -1,0 +1,18 @@
+// Test Case 9: Lexical errors
+#include <iostream>
+using namespace std;
+
+int main() {
+
+    int my#variable = 10;
+    
+    cout << "never ending string
+
+    int invalid_binary = 0b102;
+    
+    char invalid_char = 'abc';   
+    
+    int result = a @@ b;
+    
+    return 0;
+}

@@ -1,0 +1,9 @@
+// Test Case 7: Strings and Comments
+#include <iostream>
+using namespace std;
+
+int main() {
+    string s = "hello world;
+    /* never ending comment    
+    return 0;
+}
