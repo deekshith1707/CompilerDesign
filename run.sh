@@ -3,13 +3,14 @@
 make clean
 make
 
-if [ ! -f ./lexer ]; then
+if [ ! -f ./syntax_analyzer ]; then
     echo "Compilation failed. Exiting."
     exit 1
 fi
 
 TEST_DIR=./test
 
+# Create .txt copies of .c files if they don't exist
 for c_file in ${TEST_DIR}/*.c; do
     if [ -f "$c_file" ]; then
         txt_file="${c_file%.c}.txt"
@@ -20,12 +21,11 @@ for c_file in ${TEST_DIR}/*.c; do
     fi
 done
 
-for test_file in ${TEST_DIR}/*.txt; do
-    if [ -f "$test_file" ]; then
-        echo "--------------------------------------------"
-        echo "Running lexer on: ${test_file}"
-        echo "--------------------------------------------"
-        ./lexer "${test_file}"
-        echo ""
-    fi
+# Run syntax analyzer on all .txt files
+for test_file in $(ls -1v ${TEST_DIR}/*.txt); do
+    echo "--------------------------------------------"
+    echo "Running syntax analyzer on: ${test_file}"
+    echo "--------------------------------------------"
+    ./syntax_analyzer "${test_file}"
+    echo ""
 done

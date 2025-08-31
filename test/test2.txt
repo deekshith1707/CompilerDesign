@@ -1,26 +1,28 @@
-// Test Case 2: Control Structures (if-else, switch)
-#include <iostream>
-using namespace std;
+// for, while, do-while loops with break and continue
+#include <stdio.h>
 
 int main() {
-    int x = 10;
-    
-    if (x > 5) {
-        x = x + 1;
-    } else {
-        x = x - 1;
+    int i, j = 0, k = 0;
+
+    for (i = 0; i < 5; i++) {
+        if (i == 2) {
+            continue;
+        }
+        printf("For loop: %d\n", i);
     }
-    
-    switch (x) {
-        case 9:
-            x = 100;
+
+    while (j < 10) {
+        if (j == 5) {
             break;
-        case 11:
-            x = 200;
-            break;
-        default:
-            x = 300;
+        }
+        printf("While loop: %d\n", j);
+        j++;
     }
-    
+
+    do {
+        printf("Do-while loop: %d\n", k);
+        k++;
+    } while (k < 3);
+
     return 0;
 }

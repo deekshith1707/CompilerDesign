@@ -1,30 +1,22 @@
-// Test Case 3: Loops (for, while, do-while, until)
-#include <iostream>
-using namespace std;
+// Arrays, pointers, structures
+#include <stdio.h>
+
+struct Point {
+    int x;
+    int y;
+};
 
 int main() {
-    int sum = 0;
-    
-    for (int i = 0; i < 5; i++) {
-        sum += i;
-    }
-    
-    int j = 0;
-    while (j < 5) {
-        sum += j;
-        j++;
-    }
-    
-    int k = 0;
-    do {
-        sum += k;
-        k++;
-    } while (k < 5);
-    
-    int m = 10;
-    until (m < 5) {
-        m--;
-    }
-    
+    int arr[3] = {1, 2, 3};
+    int *ptr = &arr[1];
+    printf("Pointer value: %d\n", *ptr);
+
+    struct Point p;
+    p.x = 10;
+    p.y = 20;
+
+    struct Point *p_ptr = &p;
+    printf("Struct values: %d, %d\n", p_ptr->x, p_ptr->y);
+
     return 0;
 }

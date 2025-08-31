@@ -1,18 +1,13 @@
-// Test Case 9: Lexical errors
-#include <iostream>
-using namespace std;
+//invalid function call with break
+#include <stdio.h>
+
+int my_function() {
+    // SYNTAX ERROR: 'break' outside of a loop or switch.
+    break;
+    return 1;
+}
 
 int main() {
-
-    int my#variable = 10;
-    
-    cout << "never ending string
-
-    int invalid_binary = 0b102;
-    
-    char invalid_char = 'abc';   
-    
-    int result = a @@ b;
-    
+    int result = (1 + 2) * break;
     return 0;
 }

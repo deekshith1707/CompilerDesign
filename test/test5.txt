@@ -1,37 +1,20 @@
-// Test Case 5: Structures, Enums and Unions
-#include <iostream>
-using namespace std;
+//Functions with arguments and recursive calls
+#include <stdio.h>
 
-struct Point {
-    int x;
-    int y;
-};
+int factorial(int n) {
+    if (n == 0) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
 
-enum Color {
-    RED,
-    GREEN,
-    BLUE
-};
-
-union Data {
-    int i;
-    float f;
-    char c;
-};
+int add(int a, int b) {
+    return a + b;
+}
 
 int main() {
-    Point p1;
-    p1.x = 10;
-    p1.y = 20;
-    
-    Color myColor = RED;
-    
-    Data data;
-    data.i = 10;
-    data.f = 3.14;
-    
-    typedef int Integer;
-    Integer num = 42;
-    
+    int result = add(5, 7);
+    printf("Sum: %d\n", result);
+    printf("Factorial of 5: %d\n", factorial(5));
     return 0;
 }

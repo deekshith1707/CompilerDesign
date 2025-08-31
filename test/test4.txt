@@ -1,14 +1,21 @@
-// Test Case 4: Arrays and Pointers with Lexical Errors
-#include <iostream>
-using namespace std;
+// switch cases and go to
+#include <stdio.h>
 
 int main() {
-    int array@size = 5;  
-    char ch = 'A;
-    
-    int arr[5] = {10, 20, 30, 40, 50};
-    int* ptr = arr;
-    *ptr = 15;
-    
+    int choice = 2;
+
+    switch(choice) {
+        case 1:
+            printf("Case 1.\n");
+            goto end_switch;
+        case 2:
+            printf("Case 2.\n");
+            break;
+        default:
+            printf("Default.\n");
+    }
+
+end_switch:
+    printf("End of switch statement.\n");
     return 0;
 }
