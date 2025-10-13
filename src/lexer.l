@@ -1,11 +1,16 @@
 %{
+#include "../obj/parser.tab.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
+extern YYSTYPE yylval;
+extern int is_type_name(const char* name);
+
 int column = 1;
 char line_buffer[1024];
 int line_length = 0;
+int token_processed = 0;
 
 void update_position() {
     for(int i = 0; yytext[i] != '\0'; i++) {
@@ -21,9 +26,12 @@ void update_position() {
             }
         }
     }
+    token_processed = 1;
 }
 
 void print_error_context(const char* message) {
+    if (token_processed) return;
+
     int error_column = column - strlen(yytext);
     printf("Lexical Error on line %d, column %d: %s\n", yylineno, error_column, message);
     printf("%s\n", line_buffer);
@@ -31,11 +39,6 @@ void print_error_context(const char* message) {
         printf(" ");
     }
     printf("^\n");
-}
-
-void print_token(const char* token_type) {
-    printf("%-20s %-20s\n", yytext, token_type);
-    update_position();
 }
 %}
 
@@ -49,10 +52,17 @@ HEX_DIGIT   [0-9a-fA-F]
 OCT_DIGIT   [0-7]
 BIN_DIGIT   [01]
 
-INTEGER         {DIGIT}+
-HEX_INTEGER     0[xX]{HEX_DIGIT}+
-OCT_INTEGER     0{OCT_DIGIT}+
-BIN_INTEGER     0[bB]{BIN_DIGIT}+
+INTEGER         {DIGIT}+[uUlL]*
+HEX_INTEGER     0[xX]{HEX_DIGIT}+[uUlL]*
+OCT_INTEGER     0{OCT_DIGIT}+[uUlL]*
+BIN_INTEGER     0[bB]{BIN_DIGIT}+[uUlL]*
+
+FLOAT_1         {DIGIT}+\.{DIGIT}+([eE][+-]?{DIGIT}+)?[fF]?
+FLOAT_2         {DIGIT}+[eE][+-]?{DIGIT}+[fF]?
+FLOAT_3         \.{DIGIT}+([eE][+-]?{DIGIT}+)?[fF]?
+FLOAT_4         {DIGIT}+\.([eE][+-]?{DIGIT}+)?[fF]?
+FLOAT_5         {DIGIT}+[fF]
+FLOAT           {FLOAT_1}|{FLOAT_2}|{FLOAT_3}|{FLOAT_4}|{FLOAT_5}
 
 ESCAPE_SEQ      \\([nrtbfv\\'"]|[0-7]{1,3}|x{HEX_DIGIT}{1,2})
 STRING          \"({ESCAPE_SEQ}|[^"\\\n])*\"
@@ -60,117 +70,132 @@ UNTERMINATED_STRING  \"({ESCAPE_SEQ}|[^"\\\n])*
 CHAR            '({ESCAPE_SEQ}|[^'\\\n])'
 UNTERMINATED_CHAR    '({ESCAPE_SEQ}|[^'\\\n])
 
+INCLUDE_HEADER  ^[ \t]*#[ \t]*include[ \t]*<[^>]+>
+INCLUDE_FILE    ^[ \t]*#[ \t]*include[ \t]*\"[^\"]+\"
 PREPROCESSOR    ^[ \t]*#[ \t]*[a-zA-Z]+
 
 %%
 
-"//".* { }
-"/*"([^*]|\*+[^*/])*\*+"/" { }
+"//".* { update_position(); }
+"/*"([^*]|\*+[^*/])*\*+"/" { update_position(); }
 
-"if"            { print_token("keyword"); }
-"else"          { print_token("keyword"); }
-"while"         { print_token("keyword"); }
-"for"           { print_token("keyword"); }
-"do"            { print_token("keyword"); }
-"switch"        { print_token("keyword"); }
-"case"          { print_token("keyword"); }
-"default"       { print_token("keyword"); }
-"break"         { print_token("keyword"); }
-"continue"      { print_token("keyword"); }
-"return"        { print_token("keyword"); }
-"int"           { print_token("keyword"); }
-"char"          { print_token("keyword"); }
-"void"          { print_token("keyword"); }
-"struct"        { print_token("keyword"); }
-"enum"          { print_token("keyword"); }
-"union"         { print_token("keyword"); }
-"typedef"       { print_token("keyword"); }
-"static"        { print_token("keyword"); }
-"goto"          { print_token("keyword"); }
-"until"         { print_token("keyword"); }
+"if"            { update_position(); return IF; }
+"else"          { update_position(); return ELSE; }
+"while"         { update_position(); return WHILE; }
+"for"           { update_position(); return FOR; }
+"do"            { update_position(); return DO; }
+"switch"        { update_position(); return SWITCH; }
+"case"          { update_position(); return CASE; }
+"default"       { update_position(); return DEFAULT; }
+"break"         { update_position(); return BREAK; }
+"continue"      { update_position(); return CONTINUE; }
+"return"        { update_position(); return RETURN; }
+"int"           { update_position(); return INT; }
+"char"          { update_position(); return CHAR_TOKEN; }
+"float"         { update_position(); return FLOAT_TOKEN; }
+"double"        { update_position(); return DOUBLE; }
+"long"          { update_position(); return LONG; }
+"short"         { update_position(); return SHORT; }
+"unsigned"      { update_position(); return UNSIGNED; }
+"signed"        { update_position(); return SIGNED; }
+"void"          { update_position(); return VOID; }
+"struct"        { update_position(); return STRUCT; }
+"enum"          { update_position(); return ENUM; }
+"union"         { update_position(); return UNION; }
+"typedef"       { update_position(); return TYPEDEF; }
+"static"        { update_position(); return STATIC; }
+"extern"        { update_position(); return EXTERN; }
+"auto"          { update_position(); return AUTO; }
+"register"      { update_position(); return REGISTER; }
+"const"         { update_position(); return CONST; }
+"volatile"      { update_position(); return VOLATILE; }
+"goto"          { update_position(); return GOTO; }
+"until"         { update_position(); return UNTIL; }
+"sizeof"        { update_position(); return SIZEOF; }
 
-{PREPROCESSOR}    { print_token("preprocessor"); }
+{INCLUDE_HEADER}  { update_position(); return PREPROCESSOR; }
+{INCLUDE_FILE}    { update_position(); return PREPROCESSOR; }
+{PREPROCESSOR}    { update_position(); return PREPROCESSOR; }
 
-{IDENTIFIER}    { print_token("identifier"); }
+{IDENTIFIER}    {
+    update_position();
+    yylval.str = strdup(yytext);
+    if (is_type_name(yytext)) {
+        return TYPE_NAME;
+    } else {
+        return IDENTIFIER;
+    }
+}
 
-{HEX_INTEGER}   { print_token("hex_constant"); }
-{OCT_INTEGER}   { print_token("octal_constant"); }
-{BIN_INTEGER}   { print_token("binary_constant"); }
-{INTEGER}       { print_token("integer_constant"); }
+{FLOAT}         { update_position(); yylval.str = strdup(yytext); return FLOAT_CONSTANT; }
+{HEX_INTEGER}   { update_position(); yylval.str = strdup(yytext); return HEX_CONSTANT; }
+{OCT_INTEGER}   { update_position(); yylval.str = strdup(yytext); return OCTAL_CONSTANT; }
+{BIN_INTEGER}   { update_position(); yylval.str = strdup(yytext); return BINARY_CONSTANT; }
+{INTEGER}       { update_position(); yylval.str = strdup(yytext); return INTEGER_CONSTANT; }
 
-{STRING}        { print_token("string_literal"); }
+{STRING}        { update_position(); yylval.str = strdup(yytext); return STRING_LITERAL; }
 {UNTERMINATED_STRING} { print_error_context("Unterminated string literal"); }
 
-{CHAR}          { print_token("char_constant"); }
+{CHAR}          { update_position(); yylval.str = strdup(yytext); return CHAR_CONSTANT; }
 {UNTERMINATED_CHAR}  { print_error_context("Unterminated character literal"); }
 
-"+"             { print_token("operator"); }
-"-"             { print_token("operator"); }
-"*"             { print_token("operator"); }
-"/"             { print_token("operator"); }
-"%"             { print_token("operator"); }
-"++"            { print_token("operator"); }
-"--"            { print_token("operator"); }
-"=="            { print_token("operator"); }
-"!="            { print_token("operator"); }
-">"             { print_token("operator"); }
-"<"             { print_token("operator"); }
-">="            { print_token("operator"); }
-"<="            { print_token("operator"); }
-"&&"            { print_token("operator"); }
-"||"            { print_token("operator"); }
-"!"             { print_token("operator"); }
-"&"             { print_token("operator"); }
-"|"             { print_token("operator"); }
-"^"             { print_token("operator"); }
-"~"             { print_token("operator"); }
-"<<"            { print_token("operator"); }
-">>"            { print_token("operator"); }
-"="             { print_token("operator"); }
-"+="            { print_token("operator"); }
-"-="            { print_token("operator"); }
-"*="            { print_token("operator"); }
-"/="            { print_token("operator"); }
-"%="            { print_token("operator"); }
-"->"            { print_token("operator"); }
+"+="            { update_position(); return PLUS_ASSIGN; }
+"-="            { update_position(); return MINUS_ASSIGN; }
+"*="            { update_position(); return MUL_ASSIGN; }
+"/="            { update_position(); return DIV_ASSIGN; }
+"%="            { update_position(); return MOD_ASSIGN; }
+"&="            { update_position(); return AND_ASSIGN; }
+"|="            { update_position(); return OR_ASSIGN; }
+"^="            { update_position(); return XOR_ASSIGN; }
+"<<="           { update_position(); return LSHIFT_ASSIGN; }
+">>="           { update_position(); return RSHIFT_ASSIGN; }
+"="             { update_position(); return ASSIGN; }
 
-"("             { print_token("punctuation"); }
-")"             { print_token("punctuation"); }
-"{"             { print_token("punctuation"); }
-"}"             { print_token("punctuation"); }
-"["             { print_token("punctuation"); }
-"]"             { print_token("punctuation"); }
-";"             { print_token("punctuation"); }
-","             { print_token("punctuation"); }
-"."             { print_token("punctuation"); }
-":"             { print_token("punctuation"); }
+"=="            { update_position(); return EQ; }
+"!="            { update_position(); return NE; }
+"<="            { update_position(); return LE; }
+">="            { update_position(); return GE; }
+"<"             { update_position(); return LT; }
+">"             { update_position(); return GT; }
+
+"&&"            { update_position(); return LOGICAL_AND; }
+"||"            { update_position(); return LOGICAL_OR; }
+"!"             { update_position(); return LOGICAL_NOT; }
+
+"<<"            { update_position(); return LSHIFT; }
+">>"            { update_position(); return RSHIFT; }
+"&"             { update_position(); return BITWISE_AND; }
+"|"             { update_position(); return BITWISE_OR; }
+"^"             { update_position(); return BITWISE_XOR; }
+"~"             { update_position(); return BITWISE_NOT; }
+
+"++"            { update_position(); return INCREMENT; }
+"--"            { update_position(); return DECREMENT; }
+"+"             { update_position(); return PLUS; }
+"-"             { update_position(); return MINUS; }
+"*"             { update_position(); return MULTIPLY; }
+"/"             { update_position(); return DIVIDE; }
+"%"             { update_position(); return MODULO; }
+
+"->"            { update_position(); return ARROW; }
+"?"             { update_position(); return QUESTION; }
+
+"("             { update_position(); return LPAREN; }
+")"             { update_position(); return RPAREN; }
+"{"             { update_position(); return LBRACE; }
+"}"             { update_position(); return RBRACE; }
+"["             { update_position(); return LBRACKET; }
+"]"             { update_position(); return RBRACKET; }
+";"             { update_position(); return SEMICOLON; }
+","             { update_position(); return COMMA; }
+"."             { update_position(); return DOT; }
+":"             { update_position(); return COLON; }
 
 [ \t]+          { update_position(); }
 \n              { update_position(); }
 
-.               { print_error_context("Unrecognized character"); }
+.               {
+    print_error_context("Unrecognized character");
+}
 
 %%
-
-void yyerror(const char* msg) {
-    print_error_context(msg);
-}
-
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <input_file>\n", argv[0]);
-        return 1;
-    }
-
-    yyin = fopen(argv[1], "r");
-    if (!yyin) {
-        fprintf(stderr, "Error: Could not open file '%s'\n", argv[1]);
-        return 1;
-    }
-
-    printf("%-20s %-20s\n", "Lexeme", "Token");
-    yylex();
-
-    fclose(yyin);
-    return 0;
-}
