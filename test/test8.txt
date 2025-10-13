@@ -1,26 +1,8 @@
-// Test Case 8: Special Keywords and Control Flow
-#include <iostream>
-using namespace std;
+//Error: Missing semi-colon
+#include <stdio.h>
 
 int main() {
-    for (int i = 0; i < 10; i++) {
-        if (i == 5) {
-            break;
-        }
-        if (i == 2) {
-            continue;
-        }
-        cout << i << endl;
-    }
-    
-    int j = 0;
-    while (true) {
-        j++;
-        if (j > 10) goto exit;
-    }
-    
-exit:
-    cout << "loop exit" << endl;
-    
+    int a = 10
+    int b = 20;
     return 0;
 }

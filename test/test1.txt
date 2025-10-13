@@ -1,26 +1,17 @@
-// Test Case 1: Basic Arithmetic and Logical Operators
-#include <iostream>
-using namespace std;
+// Arithmetic, Logical, if-else, printf, scanf
+#include <stdio.h>
 
 int main() {
-    int a = 10;
-    int b = 20;
-    int c = a + b;
-    int d = a - b;
-    int e = a * b;
-    int f = b / a;
-    int g = b % a;
-    
-    bool h = (a > b);
-    bool i = (a < b);
-    bool j = (a >= b);
-    bool k = (a <= b);
-    bool l = (a == b);
-    bool m = (a != b);
-    
-    bool n = (h && i);
-    bool o = (h || i);
-    bool p = !h;
-    
+    int x, y, z;
+    printf("Enter two numbers: ");
+    scanf("%d %d", &x, &y);
+
+    z = (x * y) + 10;
+
+    if (z > 50 && x != 0) {
+        printf("Result is greater than 50.\n");
+    } else {
+        printf("Result is not greater than 50.\n");
+    }
     return 0;
 }
