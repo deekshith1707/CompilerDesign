@@ -119,26 +119,57 @@ PREPROCESSOR    ^[ \t]*#[ \t]*[a-zA-Z]+
 
 {IDENTIFIER}    {
     update_position();
-    yylval.str = strdup(yytext);
+    // Check if it's a typedef'd type name or a regular identifier
     if (is_type_name(yytext)) {
+        // Create a node of type TYPE_NAME for the parser
+        yylval.node = createNode(NODE_TYPE_NAME, yytext);
         return TYPE_NAME;
     } else {
+        // Create a node of type IDENTIFIER for the parser
+        yylval.node = createNode(NODE_IDENTIFIER, yytext);
         return IDENTIFIER;
     }
 }
 
-{FLOAT}         { update_position(); yylval.str = strdup(yytext); return FLOAT_CONSTANT; }
-{HEX_INTEGER}   { update_position(); yylval.str = strdup(yytext); return HEX_CONSTANT; }
-{OCT_INTEGER}   { update_position(); yylval.str = strdup(yytext); return OCTAL_CONSTANT; }
-{BIN_INTEGER}   { update_position(); yylval.str = strdup(yytext); return BINARY_CONSTANT; }
-{INTEGER}       { update_position(); yylval.str = strdup(yytext); return INTEGER_CONSTANT; }
+{FLOAT}         { 
+    update_position(); 
+    yylval.node = createNode(NODE_CONSTANT, yytext);
+    return FLOAT_CONSTANT;
+}
+{HEX_INTEGER}   { 
+    update_position(); 
+    yylval.node = createNode(NODE_CONSTANT, yytext);
+    return HEX_CONSTANT; 
+}
+{OCT_INTEGER}   { 
+    update_position(); 
+    yylval.node = createNode(NODE_CONSTANT, yytext);
+    return OCTAL_CONSTANT;
+}
+{BIN_INTEGER}   { 
+    update_position(); 
+    yylval.node = createNode(NODE_CONSTANT, yytext);
+    return BINARY_CONSTANT; 
+}
+{INTEGER}       { 
+    update_position(); 
+    yylval.node = createNode(NODE_CONSTANT, yytext);
+    return INTEGER_CONSTANT;
+}
 
-{STRING}        { update_position(); yylval.str = strdup(yytext); return STRING_LITERAL; }
+{STRING}        { 
+    update_position(); 
+    yylval.node = createNode(NODE_STRING_LITERAL, yytext);
+    return STRING_LITERAL;
+}
 {UNTERMINATED_STRING} { print_error_context("Unterminated string literal"); }
 
-{CHAR}          { update_position(); yylval.str = strdup(yytext); return CHAR_CONSTANT; }
+{CHAR}          { 
+    update_position(); 
+    yylval.node = createNode(NODE_CONSTANT, yytext);
+    return CHAR_CONSTANT;
+}
 {UNTERMINATED_CHAR}  { print_error_context("Unterminated character literal"); }
-
 "+="            { update_position(); return PLUS_ASSIGN; }
 "-="            { update_position(); return MINUS_ASSIGN; }
 "*="            { update_position(); return MUL_ASSIGN; }
