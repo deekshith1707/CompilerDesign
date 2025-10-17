@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall
+CFLAGS = -Wall -I$(SRC_DIR)
 LEX = flex
 LEXFLAGS = 
 YACC = bison
@@ -12,6 +12,9 @@ OBJ_DIR = obj
 LEXER_SRC = $(SRC_DIR)/lexer.l
 PARSER_SRC = $(SRC_DIR)/parser.y
 
+# Source files for the refactored modules
+C_SOURCES = $(SRC_DIR)/main.c $(SRC_DIR)/ast.c $(SRC_DIR)/symbol_table.c $(SRC_DIR)/ir_context.c $(SRC_DIR)/ir_generator.c
+
 LEXER_GEN_SRC = $(OBJ_DIR)/lex.yy.c
 PARSER_GEN_SRC = $(OBJ_DIR)/parser.tab.c
 PARSER_GEN_HDR = $(OBJ_DIR)/parser.tab.h
@@ -19,7 +22,10 @@ PARSER_GEN_HDR = $(OBJ_DIR)/parser.tab.h
 LEXER_GEN_OBJ = $(OBJ_DIR)/lex.yy.o
 PARSER_GEN_OBJ = $(OBJ_DIR)/parser.tab.o
 
-OBJECTS = $(LEXER_GEN_OBJ) $(PARSER_GEN_OBJ)
+# Object files for the refactored modules
+C_OBJECTS = $(OBJ_DIR)/main.o $(OBJ_DIR)/ast.o $(OBJ_DIR)/symbol_table.o $(OBJ_DIR)/ir_context.o $(OBJ_DIR)/ir_generator.o
+
+OBJECTS = $(LEXER_GEN_OBJ) $(PARSER_GEN_OBJ) $(C_OBJECTS)
 
 .PHONY: all clean help
 
@@ -43,6 +49,27 @@ $(LEXER_GEN_SRC): $(LEXER_SRC) $(PARSER_GEN_HDR)
 $(PARSER_GEN_SRC) $(PARSER_GEN_HDR): $(PARSER_SRC)
 	@mkdir -p $(OBJ_DIR)
 	cd $(OBJ_DIR) && $(YACC) $(YACCFLAGS) ../$(PARSER_SRC)
+
+# Compilation rules for the refactored modules
+$(OBJ_DIR)/main.o: $(SRC_DIR)/main.c
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/ast.o: $(SRC_DIR)/ast.c $(SRC_DIR)/ast.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/symbol_table.o: $(SRC_DIR)/symbol_table.c $(SRC_DIR)/symbol_table.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/ir_context.o: $(SRC_DIR)/ir_context.c $(SRC_DIR)/ir_context.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/ir_generator.o: $(SRC_DIR)/ir_generator.c $(SRC_DIR)/ir_generator.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
 	rm -rf $(OBJ_DIR) $(TARGET)
