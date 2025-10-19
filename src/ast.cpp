@@ -1,16 +1,16 @@
 #include "ast.h"
-#include <stdlib.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstring>
 
 extern int yylineno;
 
 TreeNode* createNode(NodeType type, const char* value) {
-    TreeNode* node = (TreeNode*)malloc(sizeof(TreeNode));
+    TreeNode* node = static_cast<TreeNode*>(malloc(sizeof(TreeNode)));
     node->type = type;
-    node->value = value ? strdup(value) : NULL;
-    node->dataType = NULL;
+    node->value = value ? strdup(value) : nullptr;
+    node->dataType = nullptr;
     node->isLValue = 0;
-    node->children = NULL;
+    node->children = nullptr;
     node->childCount = 0;
     node->childCapacity = 0;
     node->lineNumber = yylineno;
@@ -21,8 +21,8 @@ void addChild(TreeNode* parent, TreeNode* child) {
     if (!parent || !child) return;
     if (parent->childCount >= parent->childCapacity) {
         parent->childCapacity = parent->childCapacity == 0 ? 4 : parent->childCapacity * 2;
-        parent->children = (TreeNode**)realloc(parent->children,
-                                               parent->childCapacity * sizeof(TreeNode*));
+        parent->children = static_cast<TreeNode**>(realloc(parent->children,
+                                               parent->childCapacity * sizeof(TreeNode*)));
     }
     parent->children[parent->childCount++] = child;
 }

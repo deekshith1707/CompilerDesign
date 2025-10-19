@@ -1,6 +1,10 @@
 #ifndef SYMBOL_TABLE_H
 #define SYMBOL_TABLE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define MAX_SYMBOLS 2000
 
 typedef struct Symbol {
@@ -42,5 +46,9 @@ char* usualArithConv(const char* t1, const char* t2);
 int isAssignable(const char* lhs_type, const char* rhs_type);
 void setCurrentType(const char* type);
 void printSymbolTable();
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // SYMBOL_TABLE_H

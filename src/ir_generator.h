@@ -3,6 +3,10 @@
 
 #include "ast.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Main IR generation function
 char* generate_ir(TreeNode* node);
 
@@ -15,5 +19,9 @@ typedef struct {
 typedef struct {
     char* end_label;
 } SwitchContext;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // IR_GENERATOR_H

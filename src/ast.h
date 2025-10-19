@@ -1,6 +1,10 @@
 #ifndef AST_H
 #define AST_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum NodeType {
     NODE_PROGRAM, NODE_FUNCTION_DEFINITION, NODE_DECLARATION,
     NODE_DECLARATION_SPECIFIERS, NODE_DECLARATOR, NODE_DIRECT_DECLARATOR,
@@ -36,5 +40,9 @@ typedef struct TreeNode {
 TreeNode* createNode(NodeType type, const char* value);
 void addChild(TreeNode* parent, TreeNode* child);
 void freeNode(TreeNode* node);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // AST_H

@@ -1,9 +1,12 @@
 #include "ir_generator.h"
 #include "ir_context.h"
 #include "symbol_table.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+using namespace std;
 
 // Control flow stacks
 #define MAX_LOOP_DEPTH 100
@@ -15,7 +18,7 @@ static int switchDepth = 0;
 // Helper functions for control flow
 static void pushLoopLabels(char* continue_label, char* break_label) {
     if (loopDepth >= MAX_LOOP_DEPTH) {
-        fprintf(stderr, "Error: Loop nesting too deep\n");
+        cerr << "Error: Loop nesting too deep" << endl;
         return;
     }
     loopStack[loopDepth].continue_label = continue_label;
@@ -37,7 +40,7 @@ static char* getCurrentLoopBreak() {
 
 static void pushSwitchLabel(char* end_label) {
     if (switchDepth >= MAX_LOOP_DEPTH) {
-        fprintf(stderr, "Error: Switch nesting too deep\n");
+        cerr << "Error: Switch nesting too deep" << endl;
         return;
     }
     switchStack[switchDepth].end_label = end_label;
@@ -86,6 +89,10 @@ char* generate_ir(TreeNode* node) {
         
         case NODE_IDENTIFIER:
         {
+            // Process children, if any (for declarator lists)
+            for (int i = 0; i < node->childCount; i++) {
+                generate_ir(node->children[i]);
+            }
             // Return the identifier name itself
             return strdup(node->value);
         }
@@ -161,15 +168,7 @@ char* generate_ir(TreeNode* node) {
         case NODE_SELECTION_STATEMENT: // if, if-else, switch
         {
             if (strcmp(node->value, "if") == 0) {
-                // Child 0: marker (has condition)
-                // Child 1: then statement
-                TreeNode* marker = node->children[0];
-                
-                // Get condition from marker's children
-                char* cond_result = NULL;
-                if (marker->childCount > 0) {
-                    cond_result = generate_ir(marker->children[0]);
-                }
+                char* cond_result = generate_ir(node->children[0]);
                 
                 char* else_label = newLabel();
                 if (cond_result) {
@@ -184,15 +183,7 @@ char* generate_ir(TreeNode* node) {
                 emit("LABEL", else_label, "", "");
             }
             else if (strcmp(node->value, "if_else") == 0) {
-                // Child 0: marker (has condition)
-                // Child 1: then statement
-                // Child 2: else statement
-                TreeNode* marker = node->children[0];
-                
-                char* cond_result = NULL;
-                if (marker->childCount > 0) {
-                    cond_result = generate_ir(marker->children[0]);
-                }
+                char* cond_result = generate_ir(node->children[0]);
                 
                 char* else_label = newLabel();
                 char* end_label = newLabel();

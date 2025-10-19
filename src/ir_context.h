@@ -1,6 +1,10 @@
 #ifndef IR_CONTEXT_H
 #define IR_CONTEXT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define MAX_IR_SIZE 10000
 
 typedef struct {
@@ -21,5 +25,9 @@ void emit(const char* op, const char* arg1, const char* arg2, const char* result
 char* newTemp();
 char* newLabel();
 void printIR(const char* filename);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // IR_CONTEXT_H

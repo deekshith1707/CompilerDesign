@@ -1,6 +1,10 @@
 #include "symbol_table.h"
-#include <stdio.h>
-#include <string.h>
+#include <iostream>
+#include <iomanip>
+#include <cstdio>
+#include <cstring>
+
+using namespace std;
 
 Symbol symtab[MAX_SYMBOLS];
 int symCount = 0;
@@ -21,7 +25,7 @@ int getTypeSize(const char* type) {
 
 void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level) {
     if (symCount >= MAX_SYMBOLS) {
-        fprintf(stderr, "Error: Symbol table overflow\n");
+        cerr << "Error: Symbol table overflow" << endl;
         return;
     }
     
@@ -60,7 +64,7 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
 
 void insertFunction(const char* name, const char* ret_type, int param_count, char params[][128], char param_names[][128]) {
     if (symCount >= MAX_SYMBOLS) {
-        fprintf(stderr, "Error: Symbol table overflow\n");
+        cerr << "Error: Symbol table overflow" << endl;
         return;
     }
     
@@ -150,17 +154,20 @@ void setCurrentType(const char* type) {
 }
 
 void printSymbolTable() {
-    printf("\n=== SYMBOL TABLE ===\n");
-    printf("%-20s %-15s %-10s %-10s %-10s\n", "Name", "Type", "Kind", "Scope", "Size");
-    printf("------------------------------------------------------------------------\n");
+    cout << "\n=== SYMBOL TABLE ===" << endl;
+    cout << left << setw(20) << "Name"
+         << setw(15) << "Type"
+         << setw(10) << "Kind"
+         << setw(10) << "Scope"
+         << setw(10) << "Size" << endl;
+    cout << "------------------------------------------------------------------------" << endl;
     for (int i = 0; i < symCount; i++) {
-        printf("%-20s %-15s %-10s %-10d %-10d\n",
-               symtab[i].name, 
-               symtab[i].is_function ? symtab[i].return_type : symtab[i].type, 
-               symtab[i].kind,
-               symtab[i].scope_level, 
-               symtab[i].size);
+        cout << left << setw(20) << symtab[i].name
+             << setw(15) << (symtab[i].is_function ? symtab[i].return_type : symtab[i].type)
+             << setw(10) << symtab[i].kind
+             << setw(10) << symtab[i].scope_level
+             << setw(10) << symtab[i].size << endl;
     }
-    printf("------------------------------------------------------------------------\n");
-    printf("Total symbols: %d\n\n", symCount);
+    cout << "------------------------------------------------------------------------" << endl;
+    cout << "Total symbols: " << symCount << endl << endl;
 }
