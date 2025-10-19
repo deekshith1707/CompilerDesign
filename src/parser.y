@@ -129,7 +129,8 @@ program:
 
 translation_unit:
     external_declaration {
-        $$ = $1;
+        $$ = createNode(NODE_PROGRAM, "translation_unit");
+        if ($1) addChild($$, $1);
     }
     | translation_unit external_declaration {
         $$ = $1;
