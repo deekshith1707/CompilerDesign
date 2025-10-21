@@ -11,7 +11,8 @@ typedef struct Symbol {
     char name[128];
     char type[128];
     char kind[32];
-    int scope_level;
+    int scope_level;      // Hierarchical scope: 0=global, 1=function body, 2+=nested blocks
+    int parent_scope;     // Parent scope level (-1 for global scope)
     int offset;
     int size;
     int is_array;
@@ -29,6 +30,8 @@ typedef struct Symbol {
 extern Symbol symtab[MAX_SYMBOLS];
 extern int symCount;
 extern int current_scope;
+extern int parent_scopes[100];  // Stack to track parent scope relationships
+extern int scope_depth;         // Current depth in scope stack
 extern int current_offset;
 extern char currentType[128];
 
@@ -39,6 +42,7 @@ Symbol* lookupSymbol(const char* name);
 void enterScope();
 void exitScope();
 void insertSymbol(const char* name, const char* type, int is_function);
+void moveRecentSymbolsToCurrentScope(int count);  // Move last N non-function symbols to current scope
 int is_type_name(const char* name);
 int getTypeSize(const char* type);
 int isArithmeticType(const char* type);
