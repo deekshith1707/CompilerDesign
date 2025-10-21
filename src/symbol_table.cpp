@@ -21,7 +21,7 @@ int getTypeSize(const char* type) {
     if (strcmp(type, "long") == 0) return 8;
     if (strcmp(type, "float") == 0) return 4;
     if (strcmp(type, "double") == 0) return 8;
-    if (strstr(type, "*")) return 8;
+    if (strstr(type, "*")) return POINTER_SIZE;  // Use constant for pointer size
     return 4;
 }
 
@@ -60,6 +60,36 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
     } else {
         symtab[symCount].size = base_size;
     }
+    
+    current_offset += symtab[symCount].size;
+    symCount++;
+}
+
+void insertParameter(const char* name, const char* type, int ptr_level) {
+    if (symCount >= MAX_SYMBOLS) {
+        cerr << "Error: Symbol table overflow" << endl;
+        return;
+    }
+    
+    // Check for duplicate in current scope
+    for (int i = symCount - 1; i >= 0; i--) {
+        if (strcmp(symtab[i].name, name) == 0 && symtab[i].scope_level == current_scope) {
+            return; // Already exists
+        }
+    }
+    
+    strcpy(symtab[symCount].name, name);
+    strcpy(symtab[symCount].type, type);
+    strcpy(symtab[symCount].kind, "parameter");  // Mark as parameter, not variable
+    symtab[symCount].scope_level = current_scope;
+    symtab[symCount].parent_scope = (scope_depth > 0) ? parent_scopes[scope_depth - 1] : -1;
+    symtab[symCount].offset = current_offset;
+    symtab[symCount].is_array = 0;
+    symtab[symCount].ptr_level = ptr_level;
+    symtab[symCount].is_function = 0;
+    
+    // Get size based on type (handles pointers correctly)
+    symtab[symCount].size = getTypeSize(type);
     
     current_offset += symtab[symCount].size;
     symCount++;
@@ -146,6 +176,18 @@ void moveRecentSymbolsToCurrentScope(int count) {
             symtab[i].scope_level = current_scope;
             symtab[i].parent_scope = (scope_depth > 0) ? parent_scopes[scope_depth - 1] : -1;
             moved++;
+        }
+    }
+}
+
+void markRecentSymbolsAsParameters(int count) {
+    // Mark the last 'count' non-function symbols as parameters
+    // This is used after moving parameters to function scope
+    int marked = 0;
+    for (int i = symCount - 1; i >= 0 && marked < count; i--) {
+        if (!symtab[i].is_function && symtab[i].scope_level == current_scope) {
+            strcpy(symtab[i].kind, "parameter");
+            marked++;
         }
     }
 }
