@@ -17,6 +17,8 @@ int recovering_from_error = 0;
 int in_typedef = 0;
 int in_function_body = 0;  // Flag to track if we're in a function body compound statement
 int param_count_temp = 0;  // Temporary counter for function parameters
+int parsing_function_decl = 0;  // Flag to indicate we're parsing a function declaration
+char function_return_type[128] = "int";  // Save function return type before parsing parameters
 
 // Global AST root, to be passed to the IR generator
 TreeNode* ast_root = NULL;
@@ -24,6 +26,41 @@ TreeNode* ast_root = NULL;
 // Forward declarations
 extern int yylex();
 void yyerror(const char* msg);
+
+// Helper function to count pointer levels in a declarator tree
+int countPointerLevels(TreeNode* node) {
+    if (!node) return 0;
+    if (node->type == NODE_POINTER) {
+        // Count this pointer and any nested pointers
+        int count = 1;
+        for (int i = 0; i < node->childCount; i++) {
+            count += countPointerLevels(node->children[i]);
+        }
+        return count;
+    }
+    return 0;
+}
+
+// Helper function to build full type string with pointers
+void buildFullType(char* dest, const char* baseType, int ptrLevel) {
+    strcpy(dest, baseType);
+    for (int i = 0; i < ptrLevel; i++) {
+        strcat(dest, " *");
+    }
+}
+
+// Helper function to extract identifier name from declarator
+const char* extractIdentifierName(TreeNode* node) {
+    if (!node) return NULL;
+    if (node->type == NODE_IDENTIFIER) return node->value;
+    
+    // Traverse through pointers and other declarator constructs
+    for (int i = 0; i < node->childCount; i++) {
+        const char* name = extractIdentifierName(node->children[i]);
+        if (name) return name;
+    }
+    return NULL;
+}
 
 %}
 
@@ -153,14 +190,44 @@ preprocessor_directive:
 function_definition:
     declaration_specifiers declarator
     {
-        if ($2 && $2->value) {
-            // Insert the function into the symbol table at global scope
-            insertSymbol($2->value, currentType, 1);
+        // Save function return type NOW (from declaration_specifiers)
+        // It might have been overwritten during parameter parsing
+        // So we look at what was set initially
+        const char* funcName = extractIdentifierName($2);
+        if (funcName) {
+            // Check if we need to correct the type
+            // Look backwards to find what type was set for the function's declaration_specifiers
+            // For now, let's use a simpler approach - check if there's an IDENTIFIER node type
+            // Actually, let's extract the type from the declaration_specifiers AST node
+            char funcRetType[128];
+            strcpy(funcRetType, currentType);  // Default to currentType
+            
+            // Try to find the base type from declaration_specifiers
+            if ($1 && $1->childCount > 0) {
+                for (int i = 0; i < $1->childCount; i++) {
+                    TreeNode* spec = $1->children[i];
+                    if (spec && spec->value) {
+                        // Check if it's a type specifier
+                        if (strcmp(spec->value, "int") == 0 || 
+                            strcmp(spec->value, "char") == 0 ||
+                            strcmp(spec->value, "void") == 0 ||
+                            strcmp(spec->value, "float") == 0 ||
+                            strcmp(spec->value, "double") == 0) {
+                            strcpy(funcRetType, spec->value);
+                            break;  // Use the first type specifier found
+                        }
+                    }
+                }
+            }
+            
+            insertSymbol(funcName, funcRetType, 1);
         }
         // Enter function scope for parameters and local variables
         enterScope();
         // Move parameters from global scope (0) to function scope (1)
         moveRecentSymbolsToCurrentScope(param_count_temp);
+        // Mark them as parameters (not variables)
+        markRecentSymbolsAsParameters(param_count_temp);
         in_function_body = 1;  // Mark that we're entering function body
     }
     compound_statement
@@ -196,6 +263,8 @@ declaration_specifiers:
     specifier {
         $$ = createNode(NODE_DECLARATION_SPECIFIERS, "decl_specs");
         addChild($$, $1);
+        // Don't overwrite function return type if we're inside parameter parsing
+        // parsing_function_decl will be set by function_definition rule
     }
     | declaration_specifiers specifier {
         $$ = $1;
@@ -381,24 +450,31 @@ init_declarator_list:
 
 init_declarator:
     declarator {
-        if ($1 && $1->value) {
+        const char* varName = extractIdentifierName($1);
+        if (varName) {
+            int ptrLevel = countPointerLevels($1);
+            char fullType[256];
+            buildFullType(fullType, currentType, ptrLevel);
+            
             if (in_typedef) {
                 // Insert the symbol and then manually set its kind to "typedef".
-                insertVariable($1->value, currentType, 0, NULL, 0, 0);
-                if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
+                insertVariable(varName, fullType, 0, NULL, 0, ptrLevel);
+                if (symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                     strcpy(symtab[symCount - 1].kind, "typedef");
                 }
             } else {
-                insertVariable($1->value, currentType, 0, NULL, 0, 0);
+                insertVariable(varName, fullType, 0, NULL, 0, ptrLevel);
             }
         }
         $$ = $1;
     }
     | declarator ASSIGN initializer {
-        if ($1 && $1->value) {
-            if (!in_typedef) {
-                insertVariable($1->value, currentType, 0, NULL, 0, 0);
-            }
+        const char* varName = extractIdentifierName($1);
+        if (varName && !in_typedef) {
+            int ptrLevel = countPointerLevels($1);
+            char fullType[256];
+            buildFullType(fullType, currentType, ptrLevel);
+            insertVariable(varName, fullType, 0, NULL, 0, ptrLevel);
             /* emit("ASSIGN", ...) REMOVED */
         }
         
@@ -487,9 +563,15 @@ parameter_declaration:
         addChild($$, $1);
         addChild($$, $2);
         
-        // Insert into symbol table (will be at current scope when parsed)
-        if ($2 && $2->value) {
-            insertVariable($2->value, currentType, 0, NULL, 0, 0);
+        // Extract identifier name and count pointer levels
+        const char* paramName = extractIdentifierName($2);
+        if (paramName) {
+            int ptrLevel = countPointerLevels($2);
+            char fullType[256];
+            buildFullType(fullType, currentType, ptrLevel);
+            
+            // Insert into symbol table with full type
+            insertVariable(paramName, fullType, 0, NULL, 0, ptrLevel);
         }
     }
     | declaration_specifiers abstract_declarator {
