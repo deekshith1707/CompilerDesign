@@ -30,7 +30,7 @@ typedef struct Symbol {
     char name[128];
     char type[128];
     char kind[32];
-    int scope_level;      // Hierarchical scope: 0=global, 1=function body, 2+=nested blocks
+    int scope_level;      // Hierarchical scope: 0=global, each function gets unique scope
     int parent_scope;     // Parent scope level (-1 for global scope)
     int offset;
     int size;
@@ -43,6 +43,7 @@ typedef struct Symbol {
     int param_count;
     char param_types[16][128];
     char param_names[16][128];
+    char function_scope[128];  // Name of function this symbol belongs to (for non-global scopes)
 } Symbol;
 
 // Global symbol table
@@ -53,6 +54,8 @@ extern int parent_scopes[100];  // Stack to track parent scope relationships
 extern int scope_depth;         // Current depth in scope stack
 extern int current_offset;
 extern char currentType[128];
+extern char current_function[128];  // Track which function we're currently in
+extern int next_scope;              // Next scope number to assign (sequential)
 
 // Struct definition table
 extern StructDef structTable[MAX_STRUCTS];
@@ -68,6 +71,8 @@ int getStructSize(const char* struct_name);
 Symbol* lookupSymbol(const char* name);
 void enterScope();
 void exitScope();
+void enterFunctionScope(const char* func_name);  // Enter scope for a specific function
+void exitFunctionScope();
 void insertSymbol(const char* name, const char* type, int is_function);
 void moveRecentSymbolsToCurrentScope(int count);  // Move last N non-function symbols to current scope
 void markRecentSymbolsAsParameters(int count);    // Mark last N symbols as parameters
