@@ -15,6 +15,8 @@ extern FILE* yyin;
 int error_count = 0;
 int recovering_from_error = 0;
 int in_typedef = 0;
+int in_function_body = 0;  // Flag to track if we're in a function body compound statement
+int param_count_temp = 0;  // Temporary counter for function parameters
 
 // Global AST root, to be passed to the IR generator
 TreeNode* ast_root = NULL;
@@ -152,9 +154,14 @@ function_definition:
     declaration_specifiers declarator
     {
         if ($2 && $2->value) {
-            // Insert the function into the symbol table
+            // Insert the function into the symbol table at global scope
             insertSymbol($2->value, currentType, 1);
         }
+        // Enter function scope for parameters and local variables
+        enterScope();
+        // Move parameters from global scope (0) to function scope (1)
+        moveRecentSymbolsToCurrentScope(param_count_temp);
+        in_function_body = 1;  // Mark that we're entering function body
     }
     compound_statement
     {
@@ -163,6 +170,7 @@ function_definition:
         addChild($$, $2); // declarator (name)
         addChild($$, $4); // compound_statement (body)
         
+        in_function_body = 0;  // Exiting function body
         exitScope(); // Exit the function's scope
         recovering_from_error = 0;
     }
@@ -441,11 +449,11 @@ direct_declarator:
     | direct_declarator LBRACKET constant_expression RBRACKET { $$ = $1; }
     | direct_declarator LPAREN RPAREN {
         $$ = $1;
-        enterScope();
+        param_count_temp = 0;  // No parameters
     }
-    | direct_declarator LPAREN parameter_type_list RPAREN {
+    | direct_declarator LPAREN { param_count_temp = 0; } parameter_type_list RPAREN {
         $$ = $1;
-        enterScope();
+        // param_count_temp is now set by parameter_list
     }
     ;
 
@@ -462,21 +470,27 @@ parameter_list:
     parameter_declaration {
         $$ = createNode(NODE_PARAMETER_LIST, "params");
         addChild($$, $1);
+        param_count_temp = 1;
     }
     | parameter_list COMMA parameter_declaration {
         $$ = $1;
         addChild($$, $3);
+        param_count_temp++;
     }
     ;
 
 parameter_declaration:
     declaration_specifiers declarator {
-        if ($2 && $2->value) {
-            insertVariable($2->value, currentType, 0, NULL, 0, 0);
-        }
+        // Note: Parameters are inserted later when function scope is entered
+        // Store parameter info in AST node
         $$ = createNode(NODE_PARAMETER_DECLARATION, "param");
         addChild($$, $1);
         addChild($$, $2);
+        
+        // Insert into symbol table (will be at current scope when parsed)
+        if ($2 && $2->value) {
+            insertVariable($2->value, currentType, 0, NULL, 0, 0);
+        }
     }
     | declaration_specifiers abstract_declarator {
         $$ = createNode(NODE_PARAMETER_DECLARATION, "param");
@@ -489,7 +503,7 @@ parameter_declaration:
 abstract_declarator:
     MULTIPLY {
         $$ = createNode(NODE_POINTER, "*");
-        enterScope();
+        // Don't enter scope for abstract declarators
     }
     | direct_abstract_declarator { $$ = $1; }
     | MULTIPLY type_qualifier_list { $$ = createNode(NODE_POINTER, "*"); addChild($$, $2); }
@@ -542,14 +556,28 @@ labeled_statement:
     ;
 
 compound_statement:
-    LBRACE { enterScope(); } RBRACE {
+    LBRACE {
+        if (!in_function_body) {
+            enterScope();  // Only enter scope for nested blocks, not function body
+        }
+        in_function_body = 0;  // After first brace, we're past function body level
+    } RBRACE {
         $$ = createNode(NODE_COMPOUND_STATEMENT, "compound");
-        exitScope();
+        if (current_scope > 0) {
+            exitScope();
+        }
         recovering_from_error = 0;
     }
-    | LBRACE { enterScope(); } block_item_list RBRACE {
+    | LBRACE {
+        if (!in_function_body) {
+            enterScope();  // Only enter scope for nested blocks, not function body
+        }
+        in_function_body = 0;  // After first brace, we're past function body level
+    } block_item_list RBRACE {
         $$ = $3; // Pass up the block_item_list node
-        exitScope();
+        if (current_scope > 0) {
+            exitScope();
+        }
         recovering_from_error = 0;
     }
     ;
