@@ -5,8 +5,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector> // Add this
+#include <string> // Add this
 
 using namespace std;
+
+// Struct to hold case label info
+struct CaseLabel {
+    char* value; // e.g., "1"
+    char* label; // e.g., "CASE_1"
+};
 
 // Control flow stacks
 #define MAX_LOOP_DEPTH 100
@@ -54,6 +62,69 @@ static void popSwitchLabel() {
 static char* getCurrentSwitchEnd() {
     return (switchDepth > 0) ? switchStack[switchDepth - 1].end_label : NULL;
 }
+
+// NEW HELPER: Recursively find a simple constant value from an expression node
+// This is a simplification; a full implementation would evaluate constant expressions.
+static char* get_constant_value_from_expression(TreeNode* node) {
+    if (!node) return NULL;
+    
+    switch (node->type) {
+        case NODE_CONSTANT:
+        case NODE_INTEGER_CONSTANT:
+        case NODE_HEX_CONSTANT:
+        case NODE_OCTAL_CONSTANT:
+        case NODE_BINARY_CONSTANT:
+        case NODE_CHAR_CONSTANT:
+            return node->value;
+    }
+    
+    // Recurse down for wrapper nodes
+    if (node->childCount == 1) {
+        return get_constant_value_from_expression(node->children[0]);
+    }
+    
+    return NULL; // Not a simple constant
+}
+
+// NEW HELPER: Traverses the AST for a switch body to find all case/default labels
+static void find_case_labels(TreeNode* node, std::vector<CaseLabel>& cases, char** default_label) {
+    if (!node) return;
+
+    if (node->type == NODE_LABELED_STATEMENT) {
+        if (strcmp(node->value, "case") == 0 && node->childCount > 0) {
+            char* const_val = get_constant_value_from_expression(node->children[0]);
+            if (const_val) {
+                char label_name[128];
+                sprintf(label_name, "CASE_%s", const_val);
+                cases.push_back({strdup(const_val), strdup(label_name)});
+            }
+            // Continue searching in the statement *after* the label
+            if (node->childCount > 1) {
+                find_case_labels(node->children[1], cases, default_label);
+            }
+            return; // Stop recursion down this branch, we've handled it.
+        }
+        else if (strcmp(node->value, "default") == 0) {
+            *default_label = strdup("DEFAULT");
+            // Continue searching in the statement *after* the label
+            if (node->childCount > 0) {
+                find_case_labels(node->children[0], cases, default_label);
+            }
+            return; // Stop recursion
+        }
+    }
+
+    // Don't traverse into nested switches
+    if (node->type == NODE_SELECTION_STATEMENT && strcmp(node->value, "switch") == 0) {
+        return;
+    }
+
+    // Recurse
+    for (int i = 0; i < node->childCount; i++) {
+        find_case_labels(node->children[i], cases, default_label);
+    }
+}
+
 
 // Type conversion helper
 static char* convertType(char* place, const char* from_type, const char* to_type) {
@@ -210,22 +281,54 @@ char* generate_ir(TreeNode* node) {
             else if (strcmp(node->value, "switch") == 0) {
                 // Child 0: expression
                 // Child 1: statement
+                
+                // 1. Generate code for the switch expression
                 char* switch_expr = generate_ir(node->children[0]);
                 char* switch_end = newLabel();
-                
                 pushSwitchLabel(switch_end);
                 
-                if (switch_expr) {
-                    emit("SWITCH", switch_expr, "", "");
+                // === PASS 1: Collect all case/default labels ===
+                std::vector<CaseLabel> case_labels;
+                char* default_label = NULL;
+                
+                if (node->childCount > 1) {
+                    find_case_labels(node->children[1], case_labels, &default_label);
                 }
                 
-                // Generate switch body
+                char* final_default_label = default_label ? default_label : switch_end;
+                
+                // === GENERATE DISPATCH LOGIC ===
+                for (const auto& cl : case_labels) {
+                    // Compare switch_expr == case_value
+                    char* temp_const = newTemp();
+                    emit("ASSIGN", cl.value, "", temp_const);
+                    char* temp_cmp = newTemp();
+                    emit("EQ", switch_expr, temp_const, temp_cmp);
+                    // If true, jump to the case's label
+                    emit("IF_TRUE_GOTO", temp_cmp, cl.label, "");
+                }
+                
+                // 4. If no cases match, jump to default (or end)
+                emit("GOTO", final_default_label, "", "");
+                
+                // === PASS 2: Generate switch body ===
+                // This will now just emit the labels and the code inside them
                 if (node->childCount > 1) {
                     generate_ir(node->children[1]);
                 }
                 
+                // 6. Emit the final end label
                 emit("LABEL", switch_end, "", "");
                 popSwitchLabel();
+
+                // Free allocated memory
+                for (auto& cl : case_labels) {
+                    free(cl.value);
+                    free(cl.label);
+                }
+                if (default_label) {
+                    free(default_label);
+                }
             }
             return NULL;
         }
@@ -394,14 +497,20 @@ char* generate_ir(TreeNode* node) {
                 }
             }
             else if (strcmp(node->value, "case") == 0) {
+                // The dispatch logic is now handled by the 'switch' block.
+                // Here, we just need to find the constant value and emit the LABEL.
                 if (node->childCount > 0) {
-                    char* case_val = generate_ir(node->children[0]);
-                    if (case_val) {
+                    char* const_val = get_constant_value_from_expression(node->children[0]);
+                    if (const_val) {
                         char case_label[128];
-                        sprintf(case_label, "CASE_%s", case_val);
+                        sprintf(case_label, "CASE_%s", const_val);
                         emit("LABEL", case_label, "", "");
+                    } else {
+                        // This is an error, case expressions must be constant
+                        cerr << "Error: case expression is not a simple constant." << endl;
                     }
                 }
+                // Generate the statement(s) for this case
                 if (node->childCount > 1) {
                     generate_ir(node->children[1]);
                 }
@@ -430,10 +539,10 @@ char* generate_ir(TreeNode* node) {
         case NODE_ASSIGNMENT_EXPRESSION:
         {
             if (strcmp(node->value, "=") == 0) {
-                // Child 0: lhs (identifier)
+                // Child 0: lhs (could be identifier, member access, array access, etc.)
                 // Child 1: rhs (expression)
                 
-                char* lhs_name = node->children[0]->value;
+                // Generate RHS first
                 char* rhs_result = generate_ir(node->children[1]);
                 
                 // Handle type conversion if needed
@@ -441,8 +550,49 @@ char* generate_ir(TreeNode* node) {
                     rhs_result = convertType(rhs_result, node->children[1]->dataType, node->children[0]->dataType);
                 }
                 
-                emit("ASSIGN", rhs_result, "", lhs_name);
-                return lhs_name;
+                // Handle different types of LHS
+                TreeNode* lhs = node->children[0];
+                if (lhs->type == NODE_IDENTIFIER) {
+                    // Simple variable assignment: x = rhs
+                    emit("ASSIGN", rhs_result, "", lhs->value);
+                    return lhs->value;
+                }
+                else if (lhs->type == NODE_POSTFIX_EXPRESSION && strcmp(lhs->value, ".") == 0) {
+                    // Struct member assignment: struct.member = rhs
+                    char* struct_var = lhs->children[0]->value;
+                    char* member = lhs->children[1]->value;
+                    emit("ASSIGN_MEMBER", rhs_result, member, struct_var);
+                    return struct_var;
+                }
+                else if (lhs->type == NODE_POSTFIX_EXPRESSION && strcmp(lhs->value, "->") == 0) {
+                    // Pointer member assignment: ptr->member = rhs
+                    char* struct_ptr = generate_ir(lhs->children[0]);
+                    char* member = lhs->children[1]->value;
+                    emit("ASSIGN_ARROW", rhs_result, member, struct_ptr);
+                    return struct_ptr;
+                }
+                else if (lhs->type == NODE_POSTFIX_EXPRESSION && strcmp(lhs->value, "[]") == 0) {
+                    // Array assignment: arr[index] = rhs
+                    char* array = generate_ir(lhs->children[0]);
+                    char* index = generate_ir(lhs->children[1]);
+                    emit("ASSIGN_ARRAY", index, array, rhs_result); // Fixed parameter order
+                    return array;
+                }
+                else if (lhs->type == NODE_UNARY_EXPRESSION && strcmp(lhs->value, "*") == 0) {
+                    // Pointer dereference assignment: *ptr = rhs
+                    char* ptr = generate_ir(lhs->children[0]);
+                    emit("ASSIGN_DEREF", rhs_result, ptr, "");
+                    return ptr;
+                }
+                else {
+                    // Fallback: generate LHS and try direct assignment
+                    char* lhs_result = generate_ir(lhs);
+                    if (lhs_result) {
+                        emit("ASSIGN", rhs_result, "", lhs_result);
+                        return lhs_result;
+                    }
+                }
+                return rhs_result;
             }
             else if (strcmp(node->value, "+=") == 0) {
                 char* lhs = node->children[0]->value;
@@ -817,23 +967,27 @@ char* generate_ir(TreeNode* node) {
                 char* temp = newTemp();
                 char arg_count_str[32];
                 sprintf(arg_count_str, "%d", arg_count);
-                emit("CALL", func_name, arg_count > 0 ? "" : "0", temp);
+                emit("CALL", func_name, arg_count_str, temp);
                 return temp;
             }
             else if (strcmp(node->value, ".") == 0) {
-                // Member access
-                char* struct_var = generate_ir(node->children[0]);
+                // Member access: struct.member
+                // For assignment contexts, this will be handled by assignment expression
+                // For value contexts, return the member value
+                char* struct_var = node->children[0]->value;
                 char* member = node->children[1]->value;
                 char* temp = newTemp();
-                emit("MEMBER_ACCESS", struct_var, member, temp);
+                emit("LOAD_MEMBER", struct_var, member, temp);
                 return temp;
             }
             else if (strcmp(node->value, "->") == 0) {
-                // Arrow access
+                // Arrow access: ptr->member
+                // For assignment contexts, this will be handled by assignment expression
+                // For value contexts, return the member value
                 char* struct_ptr = generate_ir(node->children[0]);
                 char* member = node->children[1]->value;
                 char* temp = newTemp();
-                emit("ARROW_ACCESS", struct_ptr, member, temp);
+                emit("LOAD_ARROW", struct_ptr, member, temp);
                 return temp;
             }
             else if (strcmp(node->value, "++_post") == 0) {
@@ -870,21 +1024,50 @@ char* generate_ir(TreeNode* node) {
 
         case NODE_INITIALIZER:
         {
-            // FIX for Bug 1: Handle variable initialization
-            // AST from parser for "declarator = initializer"
-            // Child 0: declarator (e.g., NODE_IDENTIFIER "j")
-            // Child 1: initializer (e.g., NODE_INTEGER_CONSTANT "0")
+            // Handle variable initialization
             if (node->childCount > 1 && strcmp(node->value, "=") == 0) {
+                // Child 0: declarator (e.g., NODE_IDENTIFIER "j")
+                // Child 1: initializer (e.g., NODE_INTEGER_CONSTANT "0" or initializer list)
                 
-                // Get the name of the variable to assign to
-                char* lhs_name = node->children[0]->value; 
+                TreeNode* declarator = node->children[0];
+                char* lhs_name = NULL;
                 
-                // Generate the code for the right-hand side value
-                char* rhs_result = generate_ir(node->children[1]); 
+                // Extract the actual variable name from the declarator
+                if (declarator->type == NODE_IDENTIFIER) {
+                    lhs_name = declarator->value;
+                } else if (declarator->childCount > 0) {
+                    // Look for identifier in children (for complex declarators)
+                    for (int i = 0; i < declarator->childCount; i++) {
+                        if (declarator->children[i]->type == NODE_IDENTIFIER) {
+                            lhs_name = declarator->children[i]->value;
+                            break;
+                        }
+                    }
+                }
                 
-                if (lhs_name && rhs_result) {
-                    emit("ASSIGN", rhs_result, "", lhs_name);
+                if (!lhs_name) {
+                    lhs_name = declarator->value; // fallback
+                }
+                
+                TreeNode* rhs = node->children[1];
+                
+                // Check if RHS has multiple children (indicating an array initializer list)
+                if (rhs->childCount > 1) {
+                    // Array initialization: arr = {1, 2, 3}
+                    for (int i = 0; i < rhs->childCount; i++) {
+                        char* value = generate_ir(rhs->children[i]);
+                        char index_str[32];
+                        sprintf(index_str, "%d", i);
+                        emit("ASSIGN_ARRAY", index_str, lhs_name, value);
+                    }
                     return lhs_name;
+                } else {
+                    // Simple initialization (including pointer initialization)
+                    char* rhs_result = generate_ir(rhs); 
+                    if (lhs_name && rhs_result) {
+                        emit("ASSIGN", rhs_result, "", lhs_name);
+                        return lhs_name;
+                    }
                 }
             } 
             // Handle other initializer forms (like lists) if you have them

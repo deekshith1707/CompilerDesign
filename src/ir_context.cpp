@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <string>
 
 using namespace std;
 
@@ -37,6 +38,147 @@ char* newLabel() {
     return strdup(label);
 }
 
+string convertToThreeAddress(const Quadruple& quad) {
+    string op = quad.op;
+    string arg1 = quad.arg1;
+    string arg2 = quad.arg2;
+    string result = quad.result;
+    
+    // Assignment operations: x = y op z, x = op y, x = y
+    if (op == "ASSIGN") {
+        return result + " = " + arg1;
+    }
+    else if (op == "ADD") {
+        return result + " = " + arg1 + " + " + arg2;
+    }
+    else if (op == "SUB") {
+        return result + " = " + arg1 + " - " + arg2;
+    }
+    else if (op == "MUL") {
+        return result + " = " + arg1 + " * " + arg2;
+    }
+    else if (op == "DIV") {
+        return result + " = " + arg1 + " / " + arg2;
+    }
+    else if (op == "MOD") {
+        return result + " = " + arg1 + " % " + arg2;
+    }
+    else if (op == "NEG") {
+        return result + " = -" + arg1;
+    }
+    else if (op == "NOT") {
+        return result + " = !" + arg1;
+    }
+    else if (op == "BITNOT") {
+        return result + " = ~" + arg1;
+    }
+    
+    // Bitwise operations
+    else if (op == "BITAND") {
+        return result + " = " + arg1 + " & " + arg2;
+    }
+    else if (op == "BITOR") {
+        return result + " = " + arg1 + " | " + arg2;
+    }
+    else if (op == "BITXOR") {
+        return result + " = " + arg1 + " ^ " + arg2;
+    }
+    else if (op == "LSHIFT") {
+        return result + " = " + arg1 + " << " + arg2;
+    }
+    else if (op == "RSHIFT") {
+        return result + " = " + arg1 + " >> " + arg2;
+    }
+    
+    // Relational operations
+    else if (op == "LT") {
+        return result + " = " + arg1 + " < " + arg2;
+    }
+    else if (op == "GT") {
+        return result + " = " + arg1 + " > " + arg2;
+    }
+    else if (op == "LE") {
+        return result + " = " + arg1 + " <= " + arg2;
+    }
+    else if (op == "GE") {
+        return result + " = " + arg1 + " >= " + arg2;
+    }
+    else if (op == "EQ") {
+        return result + " = " + arg1 + " == " + arg2;
+    }
+    else if (op == "NE") {
+        return result + " = " + arg1 + " != " + arg2;
+    }
+    
+    // Jump operations: goto L, if x relop y goto L
+    else if (op == "GOTO") {
+        return "goto " + arg1;
+    }
+    else if (op == "IF_TRUE_GOTO") {
+        return "if " + arg1 + " != 0 goto " + arg2;
+    }
+    else if (op == "IF_FALSE_GOTO") {
+        return "if " + arg1 + " == 0 goto " + arg2;
+    }
+    
+    // Indexed assignment: x = y[i], x[i] = y
+    else if (op == "ARRAY_ACCESS") {
+        return result + " = " + arg1 + "[" + arg2 + "]";
+    }
+    else if (op == "ASSIGN_ARRAY") {
+        return arg2 + "[" + arg1 + "] = " + result; // Note: reordered for correct assignment
+    }
+    
+    // Function operations: param x, call p,n, return y
+    else if (op == "ARG" || op == "PARAM") {
+        return "param " + arg1;
+    }
+    else if (op == "CALL") {
+        if (strlen(quad.result) > 0) {
+            return result + " = call " + arg1 + ", " + (strlen(quad.arg2) > 0 ? arg2 : "0");
+        } else {
+            return "call " + arg1 + ", " + (strlen(quad.arg2) > 0 ? arg2 : "0");
+        }
+    }
+    else if (op == "RETURN") {
+        if (strlen(quad.arg1) > 0) {
+            return "return " + arg1;
+        } else {
+            return "return";
+        }
+    }
+    
+    // Pointer operations: x = &y, x = *y, *x = y
+    else if (op == "ADDR") {
+        return result + " = &" + arg1;
+    }
+    else if (op == "DEREF") {
+        return result + " = *" + arg1;
+    }
+    else if (op == "ASSIGN_DEREF") {
+        return "*" + arg2 + " = " + arg1;
+    }
+    
+    // Member access operations (convert to appropriate format)
+    else if (op == "LOAD_MEMBER") {
+        return result + " = " + arg1 + "." + arg2;
+    }
+    else if (op == "ASSIGN_MEMBER") {
+        return arg2 + "." + arg1 + " = " + result;
+    }
+    else if (op == "LOAD_ARROW") {
+        return result + " = " + arg1 + "->" + arg2;
+    }
+    else if (op == "ASSIGN_ARROW") {
+        return arg2 + "->" + arg1 + " = " + result;
+    }
+    
+    // Default case - return original format for unknown operations
+    else {
+        return string(quad.op) + " " + string(quad.arg1) + " " + string(quad.arg2) + " " + string(quad.result);
+    }
+}
+
 void printIR(const char* filename) {
     ofstream fp(filename);
     if (!fp.is_open()) {
@@ -45,23 +187,20 @@ void printIR(const char* filename) {
     }
     
     fp << "# Three-Address Code (Intermediate Representation)" << endl;
-    fp << "# Format: OPERATION ARG1 ARG2 RESULT" << endl;
     fp << "# ================================================" << endl << endl;
     
     for (int i = 0; i < irCount; i++) {
         if (strlen(IR[i].op) > 0) {
             if (strcmp(IR[i].op, "LABEL") == 0) {
-                fp << endl << IR[i].arg1 << ":" << endl;
+                fp << IR[i].arg1 << ":" << endl;
             } else if (strcmp(IR[i].op, "FUNC_BEGIN") == 0) {
-                fp << endl << "# Function Start: " << IR[i].arg1 << endl;
+                fp << endl << "# Function: " << IR[i].arg1 << endl;
             } else if (strcmp(IR[i].op, "FUNC_END") == 0) {
-                fp << "# Function End: " << IR[i].arg1 << endl;
+                fp << "# End Function: " << IR[i].arg1 << endl << endl;
             } else {
-                fp << "    " << left << setw(15) << IR[i].op
-                   << setw(25) << (strlen(IR[i].arg1) > 0 ? IR[i].arg1 : "")
-                   << setw(25) << (strlen(IR[i].arg2) > 0 ? IR[i].arg2 : "")
-                   << setw(25) << (strlen(IR[i].result) > 0 ? IR[i].result : "")
-                   << endl;
+                // Convert to three-address instruction format
+                string instruction = convertToThreeAddress(IR[i]);
+                fp << "    " << instruction << endl;
             }
         }
     }
