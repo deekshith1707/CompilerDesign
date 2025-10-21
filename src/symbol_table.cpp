@@ -14,6 +14,57 @@ int scope_depth = 0;     // Current depth in scope stack
 int current_offset = 0;
 char currentType[128] = "int";
 
+// Struct definition table
+StructDef structTable[MAX_STRUCTS];
+int structCount = 0;
+
+void insertStruct(const char* name, StructMember* members, int member_count) {
+    if (structCount >= MAX_STRUCTS) {
+        cerr << "Error: Struct table overflow" << endl;
+        return;
+    }
+    
+    strcpy(structTable[structCount].name, name);
+    structTable[structCount].member_count = member_count;
+    
+    int offset = 0;
+    for (int i = 0; i < member_count; i++) {
+        structTable[structCount].members[i] = members[i];
+        structTable[structCount].members[i].offset = offset;
+        
+        // Calculate size based on type
+        int memberSize = getTypeSize(members[i].type);
+        structTable[structCount].members[i].size = memberSize;
+        
+        offset += memberSize;
+    }
+    structTable[structCount].total_size = offset;
+    structCount++;
+}
+
+StructDef* lookupStruct(const char* name) {
+    for (int i = 0; i < structCount; i++) {
+        if (strcmp(structTable[i].name, name) == 0) {
+            return &structTable[i];
+        }
+    }
+    return NULL;
+}
+
+int getStructSize(const char* struct_name) {
+    // Extract struct name from "struct StructName" format
+    const char* name = struct_name;
+    if (strncmp(struct_name, "struct ", 7) == 0) {
+        name = struct_name + 7;
+    }
+    
+    StructDef* def = lookupStruct(name);
+    if (def) {
+        return def->total_size;
+    }
+    return 0;  // Unknown struct
+}
+
 int getTypeSize(const char* type) {
     if (strcmp(type, "char") == 0) return 1;
     if (strcmp(type, "short") == 0) return 2;
@@ -22,6 +73,12 @@ int getTypeSize(const char* type) {
     if (strcmp(type, "float") == 0) return 4;
     if (strcmp(type, "double") == 0) return 8;
     if (strstr(type, "*")) return POINTER_SIZE;  // Use constant for pointer size
+    
+    // Check if it's a struct type
+    if (strncmp(type, "struct ", 7) == 0) {
+        return getStructSize(type);
+    }
+    
     return 4;
 }
 
@@ -39,8 +96,29 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
     }
     
     strcpy(symtab[symCount].name, name);
-    strcpy(symtab[symCount].type, type);
-    strcpy(symtab[symCount].kind, is_array ? "array" : (ptr_level > 0 ? "pointer" : "variable"));
+    
+    // Build proper type string
+    char fullType[256];
+    strcpy(fullType, type);
+    
+    // For arrays, append dimensions to type (e.g., "int[3]" or "int[3][4]")
+    if (is_array && num_dims > 0) {
+        for (int i = 0; i < num_dims; i++) {
+            char dimStr[32];
+            sprintf(dimStr, "[%d]", dims[i]);
+            strcat(fullType, dimStr);
+        }
+        strcpy(symtab[symCount].type, fullType);
+        strcpy(symtab[symCount].kind, "variable");  // Arrays are variables, not separate kind
+    } else if (ptr_level > 0) {
+        // Pointer already has * in type from parser
+        strcpy(symtab[symCount].type, type);
+        strcpy(symtab[symCount].kind, "pointer");
+    } else {
+        strcpy(symtab[symCount].type, type);
+        strcpy(symtab[symCount].kind, "variable");
+    }
+    
     symtab[symCount].scope_level = current_scope;
     symtab[symCount].parent_scope = (scope_depth > 0) ? parent_scopes[scope_depth - 1] : -1;
     symtab[symCount].offset = current_offset;
@@ -48,6 +126,7 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
     symtab[symCount].ptr_level = ptr_level;
     symtab[symCount].is_function = 0;
     
+    // Calculate size
     int base_size = getTypeSize(type);
     if (is_array) {
         symtab[symCount].num_dims = num_dims;
