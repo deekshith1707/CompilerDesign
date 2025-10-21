@@ -285,8 +285,20 @@ void insertExternalFunction(const char* name, const char* ret_type) {
         return;
     }
     
+    // Determine correct return type for known library functions
+    const char* actual_ret_type = ret_type;
+    char void_ptr_type[16] = "void *";
+    
+    if (strcmp(name, "malloc") == 0 || strcmp(name, "calloc") == 0 || 
+        strcmp(name, "realloc") == 0) {
+        actual_ret_type = void_ptr_type;
+    } else if (strcmp(name, "free") == 0 || strcmp(name, "exit") == 0) {
+        actual_ret_type = "void";
+    }
+    // printf, scanf, etc. default to int (which is correct)
+    
     strcpy(symtab[symCount].name, name);
-    strcpy(symtab[symCount].return_type, ret_type);
+    strcpy(symtab[symCount].return_type, actual_ret_type);
     strcpy(symtab[symCount].kind, "function");
     symtab[symCount].scope_level = 0;  // Functions are always at global scope
     symtab[symCount].parent_scope = -1; // No parent for global scope
@@ -447,6 +459,7 @@ void setCurrentType(const char* type) {
 
 // Helper function to clean up typedef type display
 // Removes anonymous struct/union tags for cleaner output
+// Strips * from pointer types
 const char* getDisplayType(const Symbol* sym) {
     static char display_type[128];
     
@@ -462,6 +475,18 @@ const char* getDisplayType(const Symbol* sym) {
             strcpy(display_type, "struct");
             return display_type;
         }
+    }
+    
+    // If it's a pointer, strip the * for cleaner display
+    if (strcmp(sym->kind, "pointer") == 0) {
+        strcpy(display_type, sym->type);
+        // Remove all * and spaces from the end
+        int len = strlen(display_type);
+        while (len > 0 && (display_type[len-1] == '*' || display_type[len-1] == ' ')) {
+            display_type[len-1] = '\0';
+            len--;
+        }
+        return display_type;
     }
     
     // For all other cases, return the type as-is
