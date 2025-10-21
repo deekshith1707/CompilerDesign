@@ -13,6 +13,8 @@ extern int yylineno;
 extern char* yytext;
 extern FILE* yyin;
 int error_count = 0;
+static int anonymous_union_counter = 0;
+static int anonymous_struct_counter = 0;
 int recovering_from_error = 0;
 int in_typedef = 0;
 int in_function_body = 0;  // Flag to track if we're in a function body compound statement
@@ -142,6 +144,22 @@ void parseStructDefinition(const char* structName, TreeNode* memberListNode) {
     // Insert the struct definition
     if (memberCount > 0) {
         insertStruct(structName, members, memberCount);
+    }
+}
+
+// Helper function to parse and insert union definition
+void parseUnionDefinition(const char* unionName, TreeNode* memberListNode) {
+    if (!unionName || !memberListNode) return;
+    
+    StructMember members[MAX_STRUCT_MEMBERS];
+    int memberCount = 0;
+    
+    // Start processing from the root (same as struct)
+    processStructDeclaration(memberListNode, members, &memberCount, MAX_STRUCT_MEMBERS);
+    
+    // Insert the union definition (size will be max of members)
+    if (memberCount > 0) {
+        insertUnion(unionName, members, memberCount);
     }
 }
 
@@ -482,7 +500,16 @@ struct_or_union_specifier:
         addChild($$, $2);
     }
     | STRUCT LBRACE struct_declaration_list RBRACE {
-        setCurrentType("struct");
+        // Anonymous struct - generate a name for size calculation
+        char anonName[128];
+        sprintf(anonName, "__anon_struct_%d", anonymous_struct_counter++);
+        
+        // Parse struct members and insert into struct table
+        parseStructDefinition(anonName, $3);
+        
+        char structType[256];
+        sprintf(structType, "struct %s", anonName);
+        setCurrentType(structType);
         $$ = createNode(NODE_STRUCT_SPECIFIER, "struct");
         addChild($$,$3);
     }
@@ -507,7 +534,16 @@ struct_or_union_specifier:
         addChild($$, $2);
     }
     | UNION LBRACE struct_declaration_list RBRACE {
-        setCurrentType("union");
+        // Anonymous union - generate a name for size calculation
+        char anonName[128];
+        sprintf(anonName, "__anon_union_%d", anonymous_union_counter++);
+        
+        // Parse union members and insert into union table
+        parseUnionDefinition(anonName, $3);
+        
+        char unionType[256];
+        sprintf(unionType, "union %s", anonName);
+        setCurrentType(unionType);
         $$ = createNode(NODE_STRUCT_SPECIFIER, "union");
         addChild($$,$3);
     }
@@ -515,6 +551,10 @@ struct_or_union_specifier:
         char unionType[256];
         sprintf(unionType, "union %s", $2->value);
         setCurrentType(unionType);
+        
+        // Parse union members and insert into union table
+        parseUnionDefinition($2->value, $4);
+        
         $$ = createNode(NODE_STRUCT_SPECIFIER, "union_definition");
         addChild($$, $2);
         addChild($$, $4);
@@ -572,13 +612,23 @@ enumerator_list:
 enumerator:
     IDENTIFIER {
         if ($1 && $1->value) {
-            insertVariable($1->value, "enum_constant", 0, NULL, 0, 0);
+            // Enum constants are integers, so size is 4 bytes
+            insertVariable($1->value, "int", 0, NULL, 0, 0);
+            // Update the last inserted symbol's kind to enum_constant
+            if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
+                strcpy(symtab[symCount - 1].kind, "enum_constant");
+            }
         }
         $$ = $1;
     }
     | IDENTIFIER ASSIGN constant_expression {
         if ($1 && $1->value) {
-            insertVariable($1->value, "enum_constant", 0, NULL, 0, 0);
+            // Enum constants are integers, so size is 4 bytes
+            insertVariable($1->value, "int", 0, NULL, 0, 0);
+            // Update the last inserted symbol's kind to enum_constant
+            if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
+                strcpy(symtab[symCount - 1].kind, "enum_constant");
+            }
         }
         $$ = $1;
         addChild($$, $3);
