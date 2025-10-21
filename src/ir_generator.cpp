@@ -514,20 +514,66 @@ char* generate_ir(TreeNode* node) {
 
         case NODE_LOGICAL_OR_EXPRESSION:
         {
+            char* result_temp = newTemp();
+            char* true_label = newLabel();
+            char* end_label = newLabel();
+            
+            // 1. Evaluate left side
             char* left = generate_ir(node->children[0]);
+            
+            // 2. Short-circuit if true
+            emit("IF_TRUE_GOTO", left, true_label, "");
+            
+            // 3. Left was false, evaluate right side
             char* right = generate_ir(node->children[1]);
-            char* temp = newTemp();
-            emit("OR", left, right, temp);
-            return temp;
+            
+            // 4. Branch if right side is true
+            emit("IF_TRUE_GOTO", right, true_label, "");
+            
+            // 5. Both were false: assign 0
+            emit("ASSIGN", "0", "", result_temp);
+            emit("GOTO", end_label, "", "");
+            
+            // 6. True label: assign 1
+            emit("LABEL", true_label, "", "");
+            emit("ASSIGN", "1", "", result_temp);
+            
+            // 7. End label
+            emit("LABEL", end_label, "", "");
+            
+            return result_temp;
         }
 
         case NODE_LOGICAL_AND_EXPRESSION:
         {
+            char* result_temp = newTemp();
+            char* false_label = newLabel();
+            char* end_label = newLabel();
+            
+            // 1. Evaluate left side
             char* left = generate_ir(node->children[0]);
+            
+            // 2. Short-circuit if false
+            emit("IF_FALSE_GOTO", left, false_label, "");
+            
+            // 3. Left was true, evaluate right side
             char* right = generate_ir(node->children[1]);
-            char* temp = newTemp();
-            emit("AND", left, right, temp);
-            return temp;
+            
+            // 4. Branch if right side is false
+            emit("IF_FALSE_GOTO", right, false_label, "");
+            
+            // 5. Both were true: assign 1
+            emit("ASSIGN", "1", "", result_temp);
+            emit("GOTO", end_label, "", "");
+            
+            // 6. False label: assign 0
+            emit("LABEL", false_label, "", "");
+            emit("ASSIGN", "0", "", result_temp);
+            
+            // 7. End label
+            emit("LABEL", end_label, "", "");
+            
+            return result_temp;
         }
 
         case NODE_INCLUSIVE_OR_EXPRESSION:
