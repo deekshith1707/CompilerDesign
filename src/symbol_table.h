@@ -30,7 +30,7 @@ typedef struct Symbol {
     char name[128];
     char type[128];
     char kind[32];
-    int scope_level;      // Hierarchical scope: 0=global, each function gets unique scope
+    int scope_level;      // Hierarchical scope: 0=global, 1=function parameters/locals
     int parent_scope;     // Parent scope level (-1 for global scope)
     int offset;
     int size;
@@ -44,6 +44,7 @@ typedef struct Symbol {
     char param_types[16][128];
     char param_names[16][128];
     char function_scope[128];  // Name of function this symbol belongs to (for non-global scopes)
+    int is_external;           // 1 if this is an external/library function (e.g., printf)
 } Symbol;
 
 // Global symbol table
@@ -61,13 +62,21 @@ extern int next_scope;              // Next scope number to assign (sequential)
 extern StructDef structTable[MAX_STRUCTS];
 extern int structCount;
 
+// Union definition table (same structure as struct, but size calculation differs)
+extern StructDef unionTable[MAX_STRUCTS];
+extern int unionCount;
+
 // Function prototypes
 void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level);
 void insertParameter(const char* name, const char* type, int ptr_level);  // For function parameters
 void insertFunction(const char* name, const char* ret_type, int param_count, char params[][128], char param_names[][128]);
+void insertExternalFunction(const char* name, const char* ret_type);  // For library/external functions
 void insertStruct(const char* name, StructMember* members, int member_count);
+void insertUnion(const char* name, StructMember* members, int member_count);
 StructDef* lookupStruct(const char* name);
+StructDef* lookupUnion(const char* name);
 int getStructSize(const char* struct_name);
+int getUnionSize(const char* union_name);
 Symbol* lookupSymbol(const char* name);
 void enterScope();
 void exitScope();

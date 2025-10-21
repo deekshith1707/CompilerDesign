@@ -14,11 +14,15 @@ int scope_depth = 0;     // Current depth in scope stack
 int current_offset = 0;
 char currentType[128] = "int";
 char current_function[128] = "";  // Track which function we're currently in
-int next_scope = 1;               // Next scope number to assign (starts at 1, 0 is global)
+int next_scope = 1;               // Always use 1 for function scopes (not sequential)
 
 // Struct definition table
 StructDef structTable[MAX_STRUCTS];
 int structCount = 0;
+
+// Union definition table
+StructDef unionTable[MAX_STRUCTS];
+int unionCount = 0;
 
 void insertStruct(const char* name, StructMember* members, int member_count) {
     if (structCount >= MAX_STRUCTS) {
@@ -67,6 +71,57 @@ int getStructSize(const char* struct_name) {
     return 0;  // Unknown struct
 }
 
+// Insert union definition (size = max of member sizes)
+void insertUnion(const char* name, StructMember* members, int member_count) {
+    if (unionCount >= MAX_STRUCTS) {
+        cerr << "Error: Union table overflow" << endl;
+        return;
+    }
+    
+    strcpy(unionTable[unionCount].name, name);
+    unionTable[unionCount].member_count = member_count;
+    
+    int maxSize = 0;
+    for (int i = 0; i < member_count; i++) {
+        unionTable[unionCount].members[i] = members[i];
+        unionTable[unionCount].members[i].offset = 0;  // All union members start at offset 0
+        
+        // Calculate size based on type
+        int memberSize = getTypeSize(members[i].type);
+        unionTable[unionCount].members[i].size = memberSize;
+        
+        // Union size is the maximum of all member sizes
+        if (memberSize > maxSize) {
+            maxSize = memberSize;
+        }
+    }
+    unionTable[unionCount].total_size = maxSize;
+    unionCount++;
+}
+
+StructDef* lookupUnion(const char* name) {
+    for (int i = 0; i < unionCount; i++) {
+        if (strcmp(unionTable[i].name, name) == 0) {
+            return &unionTable[i];
+        }
+    }
+    return NULL;
+}
+
+int getUnionSize(const char* union_name) {
+    // Extract union name from "union UnionName" format
+    const char* name = union_name;
+    if (strncmp(union_name, "union ", 6) == 0) {
+        name = union_name + 6;
+    }
+    
+    StructDef* def = lookupUnion(name);
+    if (def) {
+        return def->total_size;
+    }
+    return 0;  // Unknown union
+}
+
 int getTypeSize(const char* type) {
     if (strcmp(type, "char") == 0) return 1;
     if (strcmp(type, "short") == 0) return 2;
@@ -79,6 +134,19 @@ int getTypeSize(const char* type) {
     // Check if it's a struct type
     if (strncmp(type, "struct ", 7) == 0) {
         return getStructSize(type);
+    }
+    
+    // Check if it's a union type
+    if (strncmp(type, "union ", 6) == 0) {
+        return getUnionSize(type);
+    }
+    
+    // Check if it's a typedef - resolve to underlying type
+    for (int i = 0; i < symCount; i++) {
+        if (strcmp(symtab[i].name, type) == 0 && strcmp(symtab[i].kind, "typedef") == 0) {
+            // Found typedef, get size of underlying type
+            return getTypeSize(symtab[i].type);
+        }
     }
     
     return 4;
@@ -127,6 +195,7 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
     symtab[symCount].is_array = is_array;
     symtab[symCount].ptr_level = ptr_level;
     symtab[symCount].is_function = 0;
+    symtab[symCount].is_external = 0;  // Variables are never external
     
     // Set the function scope name
     strcpy(symtab[symCount].function_scope, current_function);
@@ -171,6 +240,7 @@ void insertParameter(const char* name, const char* type, int ptr_level) {
     symtab[symCount].is_array = 0;
     symtab[symCount].ptr_level = ptr_level;
     symtab[symCount].is_function = 0;
+    symtab[symCount].is_external = 0;  // Parameters are never external
     
     // Set the function scope name
     strcpy(symtab[symCount].function_scope, current_function);
@@ -196,6 +266,8 @@ void insertFunction(const char* name, const char* ret_type, int param_count, cha
     symtab[symCount].is_function = 1;
     symtab[symCount].param_count = param_count;
     strcpy(symtab[symCount].function_scope, "");  // Functions are in global scope
+    symtab[symCount].is_external = 0;  // User-defined functions are not external
+    symtab[symCount].size = 0;  // Functions have size 0
     
     if (params && param_names) {
         for (int i = 0; i < param_count; i++) {
@@ -203,6 +275,26 @@ void insertFunction(const char* name, const char* ret_type, int param_count, cha
             strcpy(symtab[symCount].param_names[i], param_names[i]);
         }
     }
+    
+    symCount++;
+}
+
+void insertExternalFunction(const char* name, const char* ret_type) {
+    if (symCount >= MAX_SYMBOLS) {
+        cerr << "Error: Symbol table overflow" << endl;
+        return;
+    }
+    
+    strcpy(symtab[symCount].name, name);
+    strcpy(symtab[symCount].return_type, ret_type);
+    strcpy(symtab[symCount].kind, "function");
+    symtab[symCount].scope_level = 0;  // Functions are always at global scope
+    symtab[symCount].parent_scope = -1; // No parent for global scope
+    symtab[symCount].is_function = 1;
+    symtab[symCount].param_count = 0;  // Don't know params for external functions
+    strcpy(symtab[symCount].function_scope, "");  // Functions are in global scope
+    symtab[symCount].is_external = 1;  // Mark as external/library function
+    symtab[symCount].size = 0;  // Functions have size 0
     
     symCount++;
 }
@@ -236,9 +328,8 @@ Symbol* lookupSymbol(const char* name) {
 }
 
 void enterFunctionScope(const char* func_name) {
-    // Each function gets the next sequential scope number
-    current_scope = next_scope;
-    next_scope++;
+    // All functions use scope level 1 (not sequential)
+    current_scope = 1;
     
     // Track the function name
     strcpy(current_function, func_name);
@@ -260,14 +351,13 @@ void exitFunctionScope() {
 }
 
 void enterScope() {
-    // For nested blocks inside functions - also gets next sequential number
+    // For nested blocks inside functions - use scope level 2
     // Push current scope onto parent stack
     if (scope_depth < 100) {
         parent_scopes[scope_depth] = current_scope;
         scope_depth++;
     }
-    current_scope = next_scope;
-    next_scope++;
+    current_scope = 2;  // Nested blocks use scope 2
 }
 
 void exitScope() {
@@ -355,17 +445,169 @@ void setCurrentType(const char* type) {
     strcpy(currentType, type);
 }
 
+// Helper function to clean up typedef type display
+// Removes anonymous struct/union tags for cleaner output
+const char* getDisplayType(const Symbol* sym) {
+    static char display_type[128];
+    
+    // If it's a typedef, clean up the type string
+    if (strcmp(sym->kind, "typedef") == 0) {
+        // Check for anonymous union
+        if (strncmp(sym->type, "union __anon_union_", 19) == 0) {
+            strcpy(display_type, "union");
+            return display_type;
+        }
+        // Check for anonymous struct
+        if (strncmp(sym->type, "struct __anon_struct_", 21) == 0) {
+            strcpy(display_type, "struct");
+            return display_type;
+        }
+    }
+    
+    // For all other cases, return the type as-is
+    return sym->type;
+}
+
 void printSymbolTable() {
     cout << "\n=== SYMBOL TABLE (Hierarchical Scope View) ===" << endl;
     cout << left << setw(20) << "Name"
-         << setw(15) << "Type"
-         << setw(10) << "Kind"
+         << setw(22) << "Type"
+         << setw(14) << "Kind"
          << setw(10) << "Scope"
          << setw(12) << "Parent"
          << setw(10) << "Size" << endl;
-    cout << "--------------------------------------------------------------------------------" << endl;
+    cout << "--------------------------------------------------------------------------------------" << endl;
     
-    // Find the maximum scope level in the symbol table
+    // Print global scope (0)
+    cout << ">>> GLOBAL SCOPE (0) <<<" << endl;
+    for (int i = 0; i < symCount; i++) {
+        if (symtab[i].scope_level == 0) {
+            const char* display_type;
+            if (symtab[i].is_function) {
+                display_type = symtab[i].return_type;
+            } else {
+                display_type = getDisplayType(&symtab[i]);
+            }
+            
+            cout << left << setw(20) << symtab[i].name
+                 << setw(22) << display_type
+                 << setw(14) << symtab[i].kind
+                 << setw(10) << symtab[i].scope_level;
+            
+            // Show "external" for library functions, "none" for user-defined
+            if (symtab[i].is_external) {
+                cout << setw(12) << "external";
+            } else {
+                cout << setw(12) << "none";
+            }
+            
+            cout << setw(10) << symtab[i].size << endl;
+        }
+    }
+    
+    // Print function scope (1) - group by function
+    bool has_function_scope = false;
+    for (int i = 0; i < symCount; i++) {
+        if (symtab[i].scope_level == 1) {
+            has_function_scope = true;
+            break;
+        }
+    }
+    
+    if (has_function_scope) {
+        // Group by function name
+        char processed_functions[100][128];
+        int processed_count = 0;
+        
+        for (int i = 0; i < symCount; i++) {
+            if (symtab[i].scope_level == 1 && strlen(symtab[i].function_scope) > 0) {
+                const char* func_name = symtab[i].function_scope;
+                
+                // Check if we've already processed this function
+                bool already_processed = false;
+                for (int j = 0; j < processed_count; j++) {
+                    if (strcmp(processed_functions[j], func_name) == 0) {
+                        already_processed = true;
+                        break;
+                    }
+                }
+                
+                if (!already_processed) {
+                    // Add to processed list
+                    strcpy(processed_functions[processed_count], func_name);
+                    processed_count++;
+                    
+                    // Print header for this function
+                    cout << ">>> SCOPE LEVEL 1 (" << func_name << ") <<<" << endl;
+                    
+                    // Print all symbols in this function's scope
+                    for (int j = 0; j < symCount; j++) {
+                        if (symtab[j].scope_level == 1 && strcmp(symtab[j].function_scope, func_name) == 0) {
+                            cout << "  " << left << setw(18) << symtab[j].name
+                                 << setw(22) << getDisplayType(&symtab[j])
+                                 << setw(14) << symtab[j].kind
+                                 << setw(10) << symtab[j].scope_level
+                                 << setw(12) << func_name
+                                 << setw(10) << symtab[j].size << endl;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Print nested block scope (2)
+    bool has_nested_scope = false;
+    for (int i = 0; i < symCount; i++) {
+        if (symtab[i].scope_level == 2) {
+            has_nested_scope = true;
+            break;
+        }
+    }
+    
+    if (has_nested_scope) {
+        // Group by function name
+        char processed_functions[100][128];
+        int processed_count = 0;
+        
+        for (int i = 0; i < symCount; i++) {
+            if (symtab[i].scope_level == 2 && strlen(symtab[i].function_scope) > 0) {
+                const char* func_name = symtab[i].function_scope;
+                
+                // Check if we've already processed this function
+                bool already_processed = false;
+                for (int j = 0; j < processed_count; j++) {
+                    if (strcmp(processed_functions[j], func_name) == 0) {
+                        already_processed = true;
+                        break;
+                    }
+                }
+                
+                if (!already_processed) {
+                    // Add to processed list
+                    strcpy(processed_functions[processed_count], func_name);
+                    processed_count++;
+                    
+                    // Print header for this function's nested blocks
+                    cout << ">>> SCOPE LEVEL 2 (" << func_name << " - nested) <<<" << endl;
+                    
+                    // Print all symbols in this function's nested scope
+                    for (int j = 0; j < symCount; j++) {
+                        if (symtab[j].scope_level == 2 && strcmp(symtab[j].function_scope, func_name) == 0) {
+                            cout << "    " << left << setw(16) << symtab[j].name
+                                 << setw(22) << getDisplayType(&symtab[j])
+                                 << setw(14) << symtab[j].kind
+                                 << setw(10) << symtab[j].scope_level
+                                 << setw(12) << symtab[j].parent_scope
+                                 << setw(10) << symtab[j].size << endl;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Find max scope level
     int max_scope = 0;
     for (int i = 0; i < symCount; i++) {
         if (symtab[i].scope_level > max_scope) {
@@ -373,79 +615,6 @@ void printSymbolTable() {
         }
     }
     
-    // Group by scope level for better visualization
-    for (int scope = 0; scope <= max_scope; scope++) {
-        bool has_symbols = false;
-        for (int i = 0; i < symCount; i++) {
-            if (symtab[i].scope_level == scope) {
-                has_symbols = true;
-                break;
-            }
-        }
-        
-        if (has_symbols) {
-            if (scope == 0) {
-                cout << ">>> GLOBAL SCOPE (0) <<<" << endl;
-            } else {
-                // Find the function name and determine scope type
-                const char* func_name = "";
-                bool has_params = false;
-                bool has_vars = false;
-                
-                for (int i = 0; i < symCount; i++) {
-                    if (symtab[i].scope_level == scope) {
-                        if (strlen(symtab[i].function_scope) > 0) {
-                            func_name = symtab[i].function_scope;
-                        }
-                        if (strcmp(symtab[i].kind, "parameter") == 0) {
-                            has_params = true;
-                        }
-                        if (strcmp(symtab[i].kind, "variable") == 0 || strcmp(symtab[i].kind, "pointer") == 0) {
-                            has_vars = true;
-                        }
-                    }
-                }
-                
-                // Build descriptive scope header
-                if (strlen(func_name) > 0) {
-                    cout << ">>> SCOPE LEVEL " << scope << " (" << func_name;
-                    if (has_params && !has_vars) {
-                        cout << " - parameters";
-                    } else if (has_vars && !has_params) {
-                        cout << " - locals";
-                    }
-                    cout << ") <<<" << endl;
-                } else {
-                    cout << ">>> SCOPE LEVEL " << scope << " <<<" << endl;
-                }
-            }
-            
-            for (int i = 0; i < symCount; i++) {
-                if (symtab[i].scope_level == scope) {
-                    // Add indentation based on whether it's global or not
-                    string indent = (scope == 0) ? "" : "  ";
-                    cout << indent << left << setw(20 - indent.length()) << symtab[i].name
-                         << setw(15) << (symtab[i].is_function ? symtab[i].return_type : symtab[i].type)
-                         << setw(10) << symtab[i].kind
-                         << setw(10) << symtab[i].scope_level;
-                    
-                    // Show parent as function name or scope number
-                    if (symtab[i].parent_scope == -1) {
-                        cout << setw(12) << "none";
-                    } else if (strlen(symtab[i].function_scope) > 0 && symtab[i].parent_scope == 0) {
-                        // If parent is global and we have a function scope, show function name
-                        cout << setw(12) << symtab[i].function_scope;
-                    } else {
-                        // Show parent scope number for nested blocks
-                        cout << setw(12) << symtab[i].parent_scope;
-                    }
-                    
-                    cout << setw(10) << symtab[i].size << endl;
-                }
-            }
-        }
-    }
-    
-    cout << "--------------------------------------------------------------------------------" << endl;
+    cout << "--------------------------------------------------------------------------------------" << endl;
     cout << "Total symbols: " << symCount << " | Max scope level: " << max_scope << endl << endl;
 }
