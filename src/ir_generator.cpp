@@ -259,36 +259,47 @@ char* generate_ir(TreeNode* node) {
                 popLoopLabels();
             }
             else if (strcmp(node->value, "do_while") == 0 || strcmp(node->value, "do_until") == 0) {
-                // Child 0: marker
-                // Child 1: statement (body)
-                // Child 2: expression (condition)
+                // FIX for Bug 2: Correct do-while logic
+                // AST from parser:
+                // Child 0: expression (condition)
+                // Child 1: marker
+                // Child 2: statement (body)
                 
                 char* start_label = newLabel();
+                char* test_label = newLabel();  // New label for the condition test
                 char* end_label = newLabel();
                 
-                pushLoopLabels(start_label, end_label);
+                // 'continue' in do-while jumps to the test (test_label)
+                // 'break' jumps to the end (end_label)
+                pushLoopLabels(test_label, end_label); 
                 
                 emit("LABEL", start_label, "", "");
                 
-                // Loop body
-                if (node->childCount > 1) {
-                    generate_ir(node->children[1]);
+                // Loop body (Child 2)
+                if (node->childCount > 2) {
+                    generate_ir(node->children[2]); // This will generate the printf AND k++
                 }
                 
-                // Condition
+                // 'continue' statements will jump here
+                emit("LABEL", test_label, "", ""); 
+                
+                // Condition (Child 0)
                 char* cond_result = NULL;
-                if (node->childCount > 2) {
-                    cond_result = generate_ir(node->children[2]);
+                if (node->childCount > 0) { 
+                    cond_result = generate_ir(node->children[0]); // This generates (k < 3)
                 }
                 
                 if (cond_result) {
                     if (strcmp(node->value, "do_while") == 0) {
+                        // if (k < 3) is true, go back to start
                         emit("IF_TRUE_GOTO", cond_result, start_label, "");
                     } else {
+                        // if (k < 3) is false, go back to start
                         emit("IF_FALSE_GOTO", cond_result, start_label, "");
                     }
                 }
                 
+                // 'break' statements will jump here
                 emit("LABEL", end_label, "", "");
                 popLoopLabels();
             }
@@ -706,7 +717,7 @@ char* generate_ir(TreeNode* node) {
 
         case NODE_UNARY_EXPRESSION:
         {
-            if (strcmp(node->value, "++") == 0) {
+            if (strcmp(node->value, "++_pre") == 0) {
                 // Pre-increment
                 char* operand = node->children[0]->value;
                 char* temp = newTemp();
@@ -714,7 +725,7 @@ char* generate_ir(TreeNode* node) {
                 emit("ASSIGN", temp, "", operand);
                 return operand;
             }
-            else if (strcmp(node->value, "--") == 0) {
+            else if (strcmp(node->value, "--_pre") == 0) {
                 // Pre-decrement
                 char* operand = node->children[0]->value;
                 char* temp = newTemp();
@@ -825,7 +836,7 @@ char* generate_ir(TreeNode* node) {
                 emit("ARROW_ACCESS", struct_ptr, member, temp);
                 return temp;
             }
-            else if (strcmp(node->value, "++") == 0) {
+            else if (strcmp(node->value, "++_post") == 0) {
                 // Post-increment
                 char* operand = node->children[0]->value;
                 char* temp = newTemp();
@@ -835,7 +846,7 @@ char* generate_ir(TreeNode* node) {
                 emit("ASSIGN", temp2, "", operand);
                 return temp;
             }
-            else if (strcmp(node->value, "--") == 0) {
+            else if (strcmp(node->value, "--_post") == 0) {
                 // Post-decrement
                 char* operand = node->children[0]->value;
                 char* temp = newTemp();
@@ -859,8 +870,25 @@ char* generate_ir(TreeNode* node) {
 
         case NODE_INITIALIZER:
         {
-            // Process initializer
-            if (node->childCount > 0) {
+            // FIX for Bug 1: Handle variable initialization
+            // AST from parser for "declarator = initializer"
+            // Child 0: declarator (e.g., NODE_IDENTIFIER "j")
+            // Child 1: initializer (e.g., NODE_INTEGER_CONSTANT "0")
+            if (node->childCount > 1 && strcmp(node->value, "=") == 0) {
+                
+                // Get the name of the variable to assign to
+                char* lhs_name = node->children[0]->value; 
+                
+                // Generate the code for the right-hand side value
+                char* rhs_result = generate_ir(node->children[1]); 
+                
+                if (lhs_name && rhs_result) {
+                    emit("ASSIGN", rhs_result, "", lhs_name);
+                    return lhs_name;
+                }
+            } 
+            // Handle other initializer forms (like lists) if you have them
+            else if (node->childCount > 0) {
                 return generate_ir(node->children[0]);
             }
             return NULL;
