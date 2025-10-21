@@ -62,6 +62,138 @@ const char* extractIdentifierName(TreeNode* node) {
     return NULL;
 }
 
+// Helper function to extract type from declaration_specifiers
+const char* extractTypeFromSpecifiers(TreeNode* node) {
+    if (!node) return NULL;
+    if (node->value && (strstr(node->value, "int") || strstr(node->value, "char") || 
+                        strstr(node->value, "float") || strstr(node->value, "double") ||
+                        strstr(node->value, "struct"))) {
+        return node->value;
+    }
+    for (int i = 0; i < node->childCount; i++) {
+        const char* type = extractTypeFromSpecifiers(node->children[i]);
+        if (type) return type;
+    }
+    return NULL;
+}
+
+// Forward declaration for struct member processing
+void processStructDeclaration(TreeNode* declNode, StructMember* members, int* memberCount, int maxMembers);
+
+// Helper to recursively process struct declarations
+void processStructDeclaration(TreeNode* declNode, StructMember* members, int* memberCount, int maxMembers) {
+    if (!declNode || *memberCount >= maxMembers) return;
+    
+    // Check if this is a NODE_DECLARATION with "struct_decl"
+    if (declNode->type == NODE_DECLARATION && declNode->value && 
+        strcmp(declNode->value, "struct_decl") == 0 && declNode->childCount >= 2) {
+        
+        // First child: declaration_specifiers (the type)
+        TreeNode* specifiers = declNode->children[0];
+        const char* memberType = extractTypeFromSpecifiers(specifiers);
+        
+        if (memberType) {
+            // Second child: struct_declarator_list (the names)
+            TreeNode* declaratorList = declNode->children[1];
+            
+            // Extract all declarators in this list
+            for (int j = 0; j < declaratorList->childCount && *memberCount < maxMembers; j++) {
+                TreeNode* declarator = declaratorList->children[j];
+                const char* memberName = extractIdentifierName(declarator);
+                if (memberName) {
+                    strncpy(members[*memberCount].name, memberName, 127);
+                    members[*memberCount].name[127] = '\0';
+                    strncpy(members[*memberCount].type, memberType, 127);
+                    members[*memberCount].type[127] = '\0';
+                    (*memberCount)++;
+                }
+            }
+            
+            // If declaratorList has no children but has a name itself, it's a single declarator
+            if (declaratorList->childCount == 0) {
+                const char* memberName = extractIdentifierName(declaratorList);
+                if (memberName && *memberCount < maxMembers) {
+                    strncpy(members[*memberCount].name, memberName, 127);
+                    members[*memberCount].name[127] = '\0';
+                    strncpy(members[*memberCount].type, memberType, 127);
+                    members[*memberCount].type[127] = '\0';
+                    (*memberCount)++;
+                }
+            }
+        }
+    }
+    
+    // Recursively process all children (to handle linked list of declarations)
+    for (int i = 0; i < declNode->childCount; i++) {
+        processStructDeclaration(declNode->children[i], members, memberCount, maxMembers);
+    }
+}
+
+// Helper function to parse and insert struct definition
+void parseStructDefinition(const char* structName, TreeNode* memberListNode) {
+    if (!structName || !memberListNode) return;
+    
+    StructMember members[MAX_STRUCT_MEMBERS];
+    int memberCount = 0;
+    
+    // Start processing from the root
+    processStructDeclaration(memberListNode, members, &memberCount, MAX_STRUCT_MEMBERS);
+    
+    // Insert the struct definition
+    if (memberCount > 0) {
+        insertStruct(structName, members, memberCount);
+    }
+}
+
+// Helper function to extract array dimensions from declarator
+int extractArrayDimensions(TreeNode* node, int* dims, int maxDims) {
+    if (!node) return 0;
+    
+    int count = 0;
+    
+    // Check if this is an array declarator node
+    if (node->type == NODE_DIRECT_DECLARATOR && node->value && 
+        strcmp(node->value, "array") == 0 && node->childCount >= 2) {
+        // Second child contains the dimension
+        TreeNode* dimNode = node->children[1];
+        if (dimNode && dimNode->value) {
+            if (count < maxDims) {
+                dims[count++] = atoi(dimNode->value);
+            }
+        }
+        // First child might be another array declarator
+        if (node->children[0]) {
+            count += extractArrayDimensions(node->children[0], &dims[count], maxDims - count);
+        }
+    } else {
+        // Recursively check children
+        for (int i = 0; i < node->childCount && count < maxDims; i++) {
+            count += extractArrayDimensions(node->children[i], &dims[count], maxDims - count);
+        }
+    }
+    
+    return count;
+}
+
+// Helper function to check if declarator has array brackets
+int hasArrayBrackets(TreeNode* node) {
+    if (!node) return 0;
+    
+    // Check if this is an array declarator node
+    if (node->type == NODE_DIRECT_DECLARATOR && node->value && 
+        (strcmp(node->value, "array") == 0 || strcmp(node->value, "array[]") == 0)) {
+        return 1;
+    }
+    
+    // Recursively check children
+    for (int i = 0; i < node->childCount; i++) {
+        if (hasArrayBrackets(node->children[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 %}
 
 /* =================================================================== */
@@ -341,7 +473,10 @@ type_qualifier:
 
 struct_or_union_specifier:
     STRUCT IDENTIFIER {
-        setCurrentType("struct");
+        // Reference to existing struct
+        char structType[256];
+        sprintf(structType, "struct %s", $2->value);
+        setCurrentType(structType);
         $$ = createNode(NODE_STRUCT_SPECIFIER, "struct");
         addChild($$, $2);
     }
@@ -351,13 +486,22 @@ struct_or_union_specifier:
         addChild($$,$3);
     }
     | STRUCT IDENTIFIER LBRACE struct_declaration_list RBRACE {
-        setCurrentType("struct");
+        // Struct definition - record it
+        char structType[256];
+        sprintf(structType, "struct %s", $2->value);
+        setCurrentType(structType);
+        
+        // Parse struct members and insert into struct table
+        parseStructDefinition($2->value, $4);
+        
         $$ = createNode(NODE_STRUCT_SPECIFIER, "struct_definition");
         addChild($$, $2);
         addChild($$, $4);
     }
     | UNION IDENTIFIER {
-        setCurrentType("union");
+        char unionType[256];
+        sprintf(unionType, "union %s", $2->value);
+        setCurrentType(unionType);
         $$ = createNode(NODE_STRUCT_SPECIFIER, "union");
         addChild($$, $2);
     }
@@ -367,7 +511,9 @@ struct_or_union_specifier:
         addChild($$,$3);
     }
     | UNION IDENTIFIER LBRACE struct_declaration_list RBRACE {
-        setCurrentType("union");
+        char unionType[256];
+        sprintf(unionType, "union %s", $2->value);
+        setCurrentType(unionType);
         $$ = createNode(NODE_STRUCT_SPECIFIER, "union_definition");
         addChild($$, $2);
         addChild($$, $4);
@@ -453,17 +599,25 @@ init_declarator:
         const char* varName = extractIdentifierName($1);
         if (varName) {
             int ptrLevel = countPointerLevels($1);
+            int isArray = hasArrayBrackets($1);
+            int arrayDims[10] = {0};
+            int numDims = 0;
+            
+            if (isArray) {
+                numDims = extractArrayDimensions($1, arrayDims, 10);
+            }
+            
             char fullType[256];
             buildFullType(fullType, currentType, ptrLevel);
             
             if (in_typedef) {
                 // Insert the symbol and then manually set its kind to "typedef".
-                insertVariable(varName, fullType, 0, NULL, 0, ptrLevel);
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel);
                 if (symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                     strcpy(symtab[symCount - 1].kind, "typedef");
                 }
             } else {
-                insertVariable(varName, fullType, 0, NULL, 0, ptrLevel);
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel);
             }
         }
         $$ = $1;
@@ -472,9 +626,17 @@ init_declarator:
         const char* varName = extractIdentifierName($1);
         if (varName && !in_typedef) {
             int ptrLevel = countPointerLevels($1);
+            int isArray = hasArrayBrackets($1);
+            int arrayDims[10] = {0};
+            int numDims = 0;
+            
+            if (isArray) {
+                numDims = extractArrayDimensions($1, arrayDims, 10);
+            }
+            
             char fullType[256];
             buildFullType(fullType, currentType, ptrLevel);
-            insertVariable(varName, fullType, 0, NULL, 0, ptrLevel);
+            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel);
             /* emit("ASSIGN", ...) REMOVED */
         }
         
@@ -521,8 +683,15 @@ declarator:
 direct_declarator:
     IDENTIFIER { $$ = $1; }
     | LPAREN declarator RPAREN { $$ = $2; }
-    | direct_declarator LBRACKET RBRACKET { $$ = $1; }
-    | direct_declarator LBRACKET constant_expression RBRACKET { $$ = $1; }
+    | direct_declarator LBRACKET RBRACKET { 
+        $$ = createNode(NODE_DIRECT_DECLARATOR, "array[]");
+        addChild($$, $1);
+    }
+    | direct_declarator LBRACKET constant_expression RBRACKET { 
+        $$ = createNode(NODE_DIRECT_DECLARATOR, "array");
+        addChild($$, $1);
+        if ($3) addChild($$, $3);  // Store the dimension
+    }
     | direct_declarator LPAREN RPAREN {
         $$ = $1;
         param_count_temp = 0;  // No parameters
