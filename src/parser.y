@@ -1497,7 +1497,7 @@ postfix_expression:
         /* == Check for undeclared function and implicitly declare it == */
         Symbol* sym = lookupSymbol($1->value);
         if (!sym) {
-            insertFunction($1->value, "int", 0, NULL, NULL);
+            insertExternalFunction($1->value, "int");
         } else if (!sym->is_function) {
             char err_msg[256];
             sprintf(err_msg, "Called object '%s' is not a function", $1->value);
@@ -1515,7 +1515,7 @@ postfix_expression:
         /* == Check for undeclared function and implicitly declare it == */
         Symbol* sym = lookupSymbol($1->value);
         if (!sym) {
-            insertFunction($1->value, "int", 0, NULL, NULL);
+            insertExternalFunction($1->value, "int");
         } else if (!sym->is_function) {
             char err_msg[256];
             sprintf(err_msg, "Called object '%s' is not a function", $1->value);
