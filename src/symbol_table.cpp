@@ -13,6 +13,8 @@ int parent_scopes[100];  // Stack to track parent scope relationships
 int scope_depth = 0;     // Current depth in scope stack
 int current_offset = 0;
 char currentType[128] = "int";
+char current_function[128] = "";  // Track which function we're currently in
+int next_scope = 1;               // Next scope number to assign (starts at 1, 0 is global)
 
 // Struct definition table
 StructDef structTable[MAX_STRUCTS];
@@ -126,6 +128,9 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
     symtab[symCount].ptr_level = ptr_level;
     symtab[symCount].is_function = 0;
     
+    // Set the function scope name
+    strcpy(symtab[symCount].function_scope, current_function);
+    
     // Calculate size
     int base_size = getTypeSize(type);
     if (is_array) {
@@ -167,6 +172,9 @@ void insertParameter(const char* name, const char* type, int ptr_level) {
     symtab[symCount].ptr_level = ptr_level;
     symtab[symCount].is_function = 0;
     
+    // Set the function scope name
+    strcpy(symtab[symCount].function_scope, current_function);
+    
     // Get size based on type (handles pointers correctly)
     symtab[symCount].size = getTypeSize(type);
     
@@ -187,6 +195,7 @@ void insertFunction(const char* name, const char* ret_type, int param_count, cha
     symtab[symCount].parent_scope = -1; // No parent for global scope
     symtab[symCount].is_function = 1;
     symtab[symCount].param_count = param_count;
+    strcpy(symtab[symCount].function_scope, "");  // Functions are in global scope
     
     if (params && param_names) {
         for (int i = 0; i < param_count; i++) {
@@ -226,13 +235,39 @@ Symbol* lookupSymbol(const char* name) {
     return NULL;
 }
 
+void enterFunctionScope(const char* func_name) {
+    // Each function gets the next sequential scope number
+    current_scope = next_scope;
+    next_scope++;
+    
+    // Track the function name
+    strcpy(current_function, func_name);
+    
+    // Push onto scope stack
+    if (scope_depth < 100) {
+        parent_scopes[scope_depth] = 0;  // Parent is always global scope (0)
+        scope_depth++;
+    }
+}
+
+void exitFunctionScope() {
+    // Exit function scope
+    if (scope_depth > 0) {
+        scope_depth--;
+    }
+    current_scope = 0;  // Return to global scope
+    strcpy(current_function, "");  // Clear current function
+}
+
 void enterScope() {
+    // For nested blocks inside functions - also gets next sequential number
     // Push current scope onto parent stack
     if (scope_depth < 100) {
         parent_scopes[scope_depth] = current_scope;
         scope_depth++;
     }
-    current_scope++;
+    current_scope = next_scope;
+    next_scope++;
 }
 
 void exitScope() {
@@ -254,6 +289,7 @@ void moveRecentSymbolsToCurrentScope(int count) {
         if (!symtab[i].is_function && symtab[i].scope_level == 0) {
             symtab[i].scope_level = current_scope;
             symtab[i].parent_scope = (scope_depth > 0) ? parent_scopes[scope_depth - 1] : -1;
+            strcpy(symtab[i].function_scope, current_function);  // Set function scope
             moved++;
         }
     }
@@ -351,21 +387,56 @@ void printSymbolTable() {
             if (scope == 0) {
                 cout << ">>> GLOBAL SCOPE (0) <<<" << endl;
             } else {
-                cout << ">>> SCOPE LEVEL " << scope << " <<<" << endl;
+                // Find the function name and determine scope type
+                const char* func_name = "";
+                bool has_params = false;
+                bool has_vars = false;
+                
+                for (int i = 0; i < symCount; i++) {
+                    if (symtab[i].scope_level == scope) {
+                        if (strlen(symtab[i].function_scope) > 0) {
+                            func_name = symtab[i].function_scope;
+                        }
+                        if (strcmp(symtab[i].kind, "parameter") == 0) {
+                            has_params = true;
+                        }
+                        if (strcmp(symtab[i].kind, "variable") == 0 || strcmp(symtab[i].kind, "pointer") == 0) {
+                            has_vars = true;
+                        }
+                    }
+                }
+                
+                // Build descriptive scope header
+                if (strlen(func_name) > 0) {
+                    cout << ">>> SCOPE LEVEL " << scope << " (" << func_name;
+                    if (has_params && !has_vars) {
+                        cout << " - parameters";
+                    } else if (has_vars && !has_params) {
+                        cout << " - locals";
+                    }
+                    cout << ") <<<" << endl;
+                } else {
+                    cout << ">>> SCOPE LEVEL " << scope << " <<<" << endl;
+                }
             }
             
             for (int i = 0; i < symCount; i++) {
                 if (symtab[i].scope_level == scope) {
-                    // Add indentation based on scope depth
-                    string indent(scope * 2, ' ');
-                    cout << indent << left << setw(20 - scope * 2) << symtab[i].name
+                    // Add indentation based on whether it's global or not
+                    string indent = (scope == 0) ? "" : "  ";
+                    cout << indent << left << setw(20 - indent.length()) << symtab[i].name
                          << setw(15) << (symtab[i].is_function ? symtab[i].return_type : symtab[i].type)
                          << setw(10) << symtab[i].kind
                          << setw(10) << symtab[i].scope_level;
                     
+                    // Show parent as function name or scope number
                     if (symtab[i].parent_scope == -1) {
                         cout << setw(12) << "none";
+                    } else if (strlen(symtab[i].function_scope) > 0 && symtab[i].parent_scope == 0) {
+                        // If parent is global and we have a function scope, show function name
+                        cout << setw(12) << symtab[i].function_scope;
                     } else {
+                        // Show parent scope number for nested blocks
                         cout << setw(12) << symtab[i].parent_scope;
                     }
                     

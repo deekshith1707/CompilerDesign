@@ -355,8 +355,9 @@ function_definition:
             insertSymbol(funcName, funcRetType, 1);
         }
         // Enter function scope for parameters and local variables
-        enterScope();
-        // Move parameters from global scope (0) to function scope (1)
+        // Each function gets its own unique scope
+        enterFunctionScope(funcName);
+        // Move parameters from global scope (0) to function scope
         moveRecentSymbolsToCurrentScope(param_count_temp);
         // Mark them as parameters (not variables)
         markRecentSymbolsAsParameters(param_count_temp);
@@ -370,7 +371,7 @@ function_definition:
         addChild($$, $4); // compound_statement (body)
         
         in_function_body = 0;  // Exiting function body
-        exitScope(); // Exit the function's scope
+        exitFunctionScope(); // Exit the function's scope
         recovering_from_error = 0;
     }
     ;
