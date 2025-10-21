@@ -20,6 +20,10 @@ int next_scope = 1;               // Always use 1 for function scopes (not seque
 StructDef structTable[MAX_STRUCTS];
 int structCount = 0;
 
+// Union definition table
+StructDef unionTable[MAX_STRUCTS];
+int unionCount = 0;
+
 void insertStruct(const char* name, StructMember* members, int member_count) {
     if (structCount >= MAX_STRUCTS) {
         cerr << "Error: Struct table overflow" << endl;
@@ -67,6 +71,57 @@ int getStructSize(const char* struct_name) {
     return 0;  // Unknown struct
 }
 
+// Insert union definition (size = max of member sizes)
+void insertUnion(const char* name, StructMember* members, int member_count) {
+    if (unionCount >= MAX_STRUCTS) {
+        cerr << "Error: Union table overflow" << endl;
+        return;
+    }
+    
+    strcpy(unionTable[unionCount].name, name);
+    unionTable[unionCount].member_count = member_count;
+    
+    int maxSize = 0;
+    for (int i = 0; i < member_count; i++) {
+        unionTable[unionCount].members[i] = members[i];
+        unionTable[unionCount].members[i].offset = 0;  // All union members start at offset 0
+        
+        // Calculate size based on type
+        int memberSize = getTypeSize(members[i].type);
+        unionTable[unionCount].members[i].size = memberSize;
+        
+        // Union size is the maximum of all member sizes
+        if (memberSize > maxSize) {
+            maxSize = memberSize;
+        }
+    }
+    unionTable[unionCount].total_size = maxSize;
+    unionCount++;
+}
+
+StructDef* lookupUnion(const char* name) {
+    for (int i = 0; i < unionCount; i++) {
+        if (strcmp(unionTable[i].name, name) == 0) {
+            return &unionTable[i];
+        }
+    }
+    return NULL;
+}
+
+int getUnionSize(const char* union_name) {
+    // Extract union name from "union UnionName" format
+    const char* name = union_name;
+    if (strncmp(union_name, "union ", 6) == 0) {
+        name = union_name + 6;
+    }
+    
+    StructDef* def = lookupUnion(name);
+    if (def) {
+        return def->total_size;
+    }
+    return 0;  // Unknown union
+}
+
 int getTypeSize(const char* type) {
     if (strcmp(type, "char") == 0) return 1;
     if (strcmp(type, "short") == 0) return 2;
@@ -79,6 +134,19 @@ int getTypeSize(const char* type) {
     // Check if it's a struct type
     if (strncmp(type, "struct ", 7) == 0) {
         return getStructSize(type);
+    }
+    
+    // Check if it's a union type
+    if (strncmp(type, "union ", 6) == 0) {
+        return getUnionSize(type);
+    }
+    
+    // Check if it's a typedef - resolve to underlying type
+    for (int i = 0; i < symCount; i++) {
+        if (strcmp(symtab[i].name, type) == 0 && strcmp(symtab[i].kind, "typedef") == 0) {
+            // Found typedef, get size of underlying type
+            return getTypeSize(symtab[i].type);
+        }
     }
     
     return 4;
@@ -377,23 +445,53 @@ void setCurrentType(const char* type) {
     strcpy(currentType, type);
 }
 
+// Helper function to clean up typedef type display
+// Removes anonymous struct/union tags for cleaner output
+const char* getDisplayType(const Symbol* sym) {
+    static char display_type[128];
+    
+    // If it's a typedef, clean up the type string
+    if (strcmp(sym->kind, "typedef") == 0) {
+        // Check for anonymous union
+        if (strncmp(sym->type, "union __anon_union_", 19) == 0) {
+            strcpy(display_type, "union");
+            return display_type;
+        }
+        // Check for anonymous struct
+        if (strncmp(sym->type, "struct __anon_struct_", 21) == 0) {
+            strcpy(display_type, "struct");
+            return display_type;
+        }
+    }
+    
+    // For all other cases, return the type as-is
+    return sym->type;
+}
+
 void printSymbolTable() {
     cout << "\n=== SYMBOL TABLE (Hierarchical Scope View) ===" << endl;
     cout << left << setw(20) << "Name"
-         << setw(15) << "Type"
-         << setw(10) << "Kind"
+         << setw(22) << "Type"
+         << setw(14) << "Kind"
          << setw(10) << "Scope"
          << setw(12) << "Parent"
          << setw(10) << "Size" << endl;
-    cout << "--------------------------------------------------------------------------------" << endl;
+    cout << "--------------------------------------------------------------------------------------" << endl;
     
     // Print global scope (0)
     cout << ">>> GLOBAL SCOPE (0) <<<" << endl;
     for (int i = 0; i < symCount; i++) {
         if (symtab[i].scope_level == 0) {
+            const char* display_type;
+            if (symtab[i].is_function) {
+                display_type = symtab[i].return_type;
+            } else {
+                display_type = getDisplayType(&symtab[i]);
+            }
+            
             cout << left << setw(20) << symtab[i].name
-                 << setw(15) << (symtab[i].is_function ? symtab[i].return_type : symtab[i].type)
-                 << setw(10) << symtab[i].kind
+                 << setw(22) << display_type
+                 << setw(14) << symtab[i].kind
                  << setw(10) << symtab[i].scope_level;
             
             // Show "external" for library functions, "none" for user-defined
@@ -446,8 +544,8 @@ void printSymbolTable() {
                     for (int j = 0; j < symCount; j++) {
                         if (symtab[j].scope_level == 1 && strcmp(symtab[j].function_scope, func_name) == 0) {
                             cout << "  " << left << setw(18) << symtab[j].name
-                                 << setw(15) << symtab[j].type
-                                 << setw(10) << symtab[j].kind
+                                 << setw(22) << getDisplayType(&symtab[j])
+                                 << setw(14) << symtab[j].kind
                                  << setw(10) << symtab[j].scope_level
                                  << setw(12) << func_name
                                  << setw(10) << symtab[j].size << endl;
@@ -497,8 +595,8 @@ void printSymbolTable() {
                     for (int j = 0; j < symCount; j++) {
                         if (symtab[j].scope_level == 2 && strcmp(symtab[j].function_scope, func_name) == 0) {
                             cout << "    " << left << setw(16) << symtab[j].name
-                                 << setw(15) << symtab[j].type
-                                 << setw(10) << symtab[j].kind
+                                 << setw(22) << getDisplayType(&symtab[j])
+                                 << setw(14) << symtab[j].kind
                                  << setw(10) << symtab[j].scope_level
                                  << setw(12) << symtab[j].parent_scope
                                  << setw(10) << symtab[j].size << endl;
@@ -517,6 +615,6 @@ void printSymbolTable() {
         }
     }
     
-    cout << "--------------------------------------------------------------------------------" << endl;
+    cout << "--------------------------------------------------------------------------------------" << endl;
     cout << "Total symbols: " << symCount << " | Max scope level: " << max_scope << endl << endl;
 }
