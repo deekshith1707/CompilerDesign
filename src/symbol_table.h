@@ -7,6 +7,24 @@ extern "C" {
 
 #define MAX_SYMBOLS 2000
 #define POINTER_SIZE 8  // 8 bytes for 64-bit pointers, change to 4 for 32-bit
+#define MAX_STRUCT_MEMBERS 50
+#define MAX_STRUCTS 100
+
+// Structure member information
+typedef struct StructMember {
+    char name[128];
+    char type[128];
+    int offset;
+    int size;
+} StructMember;
+
+// Structure definition table
+typedef struct StructDef {
+    char name[128];
+    StructMember members[MAX_STRUCT_MEMBERS];
+    int member_count;
+    int total_size;
+} StructDef;
 
 typedef struct Symbol {
     char name[128];
@@ -36,10 +54,17 @@ extern int scope_depth;         // Current depth in scope stack
 extern int current_offset;
 extern char currentType[128];
 
+// Struct definition table
+extern StructDef structTable[MAX_STRUCTS];
+extern int structCount;
+
 // Function prototypes
 void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level);
 void insertParameter(const char* name, const char* type, int ptr_level);  // For function parameters
 void insertFunction(const char* name, const char* ret_type, int param_count, char params[][128], char param_names[][128]);
+void insertStruct(const char* name, StructMember* members, int member_count);
+StructDef* lookupStruct(const char* name);
+int getStructSize(const char* struct_name);
 Symbol* lookupSymbol(const char* name);
 void enterScope();
 void exitScope();
