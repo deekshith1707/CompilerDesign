@@ -22,7 +22,18 @@ int is_static = 0;  // Flag to track if current declaration is static
 int in_function_body = 0;  // Flag to track if we're in a function body compound statement
 int param_count_temp = 0;  // Temporary counter for function parameters
 int parsing_function_decl = 0;  // Flag to indicate we're parsing a function declaration
+int in_function_definition = 0;  // Flag to indicate we're parsing a function definition (not just a declaration)
 char function_return_type[128] = "int";  // Save function return type before parsing parameters
+
+// Structure to store parameter information during parsing
+typedef struct {
+    char name[256];
+    char type[256];
+    int ptrLevel;
+} ParamInfo;
+
+ParamInfo pending_params[32];  // Store up to 32 parameters
+int pending_param_count = 0;
 
 // Global AST root, to be passed to the IR generator
 TreeNode* ast_root = NULL;
@@ -234,6 +245,23 @@ int hasArrayBrackets(TreeNode* node) {
     return 0;
 }
 
+// Helper function to check if a declarator is a function declarator (has parameters)
+int isFunctionDeclarator(TreeNode* node) {
+    if (!node) return 0;
+    
+    // Check if this node has NODE_PARAMETER_LIST as a child
+    for (int i = 0; i < node->childCount; i++) {
+        if (node->children[i] && node->children[i]->type == NODE_PARAMETER_LIST) {
+            return 1;
+        }
+        // Recursively check children
+        if (isFunctionDeclarator(node->children[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 %}
 
 /* =================================================================== */
@@ -364,31 +392,26 @@ preprocessor_directive:
 function_definition:
     declaration_specifiers declarator
     {
-        // Save function return type NOW (from declaration_specifiers)
-        // It might have been overwritten during parameter parsing
-        // So we look at what was set initially
+        // Now we know it's a definition (has compound_statement coming)
+        // Extract function name
         const char* funcName = extractIdentifierName($2);
         if (funcName) {
-            // Check if we need to correct the type
-            // Look backwards to find what type was set for the function's declaration_specifiers
-            // For now, let's use a simpler approach - check if there's an IDENTIFIER node type
-            // Actually, let's extract the type from the declaration_specifiers AST node
+            // Extract return type from declaration_specifiers
             char funcRetType[128];
-            strcpy(funcRetType, currentType);  // Default to currentType
+            strcpy(funcRetType, currentType);
             
             // Try to find the base type from declaration_specifiers
             if ($1 && $1->childCount > 0) {
                 for (int i = 0; i < $1->childCount; i++) {
                     TreeNode* spec = $1->children[i];
                     if (spec && spec->value) {
-                        // Check if it's a type specifier
                         if (strcmp(spec->value, "int") == 0 || 
                             strcmp(spec->value, "char") == 0 ||
                             strcmp(spec->value, "void") == 0 ||
                             strcmp(spec->value, "float") == 0 ||
                             strcmp(spec->value, "double") == 0) {
                             strcpy(funcRetType, spec->value);
-                            break;  // Use the first type specifier found
+                            break;
                         }
                     }
                 }
@@ -396,15 +419,20 @@ function_definition:
             
             insertSymbol(funcName, funcRetType, 1, is_static);
         }
-        is_static = 0;  // Reset static flag after processing function declaration
-        // Enter function scope for parameters and local variables
-        // Each function gets its own unique scope
+        is_static = 0;
+        // Enter function scope
         enterFunctionScope(funcName);
-        // Move parameters from global scope (0) to function scope
-        moveRecentSymbolsToCurrentScope(param_count_temp);
-        // Mark them as parameters (not variables)
-        markRecentSymbolsAsParameters(param_count_temp);
-        in_function_body = 1;  // Mark that we're entering function body
+        
+        // Now insert the pending parameters that were stored during parsing
+        for (int i = 0; i < pending_param_count; i++) {
+            insertVariable(pending_params[i].name, pending_params[i].type, 0, NULL, 0, pending_params[i].ptrLevel, 0);
+        }
+        // Mark them as parameters
+        markRecentSymbolsAsParameters(pending_param_count);
+        param_count_temp = pending_param_count;  // Update param_count_temp for IR generation
+        pending_param_count = 0;  // Reset for next function
+        
+        in_function_body = 1;
     }
     compound_statement
     {
@@ -413,8 +441,9 @@ function_definition:
         addChild($$, $2); // declarator (name)
         addChild($$, $4); // compound_statement (body)
         
-        in_function_body = 0;  // Exiting function body
-        exitFunctionScope(); // Exit the function's scope
+        in_function_body = 0;
+        param_count_temp = 0;
+        exitFunctionScope();
         recovering_from_error = 0;
     }
     ;
@@ -426,6 +455,7 @@ declaration:
         in_typedef = 0;
         is_static = 0;
         recovering_from_error = 0;
+        pending_param_count = 0;  // Reset pending parameters (in case this was a function declaration)
     }
     | declaration_specifiers init_declarator_list SEMICOLON {
         $$ = createNode(NODE_DECLARATION, "declaration");
@@ -434,6 +464,7 @@ declaration:
         in_typedef = 0;
         is_static = 0;
         recovering_from_error = 0;
+        pending_param_count = 0;  // Reset pending parameters (in case this was a function declaration)
     }
     ;
 
@@ -678,7 +709,8 @@ init_declarator_list:
 init_declarator:
     declarator {
         const char* varName = extractIdentifierName($1);
-        if (varName) {
+        // Skip insertion for function declarators (pending_param_count > 0 means we just parsed parameters)
+        if (varName && pending_param_count == 0) {
             int ptrLevel = countPointerLevels($1);
             int isArray = hasArrayBrackets($1);
             int arrayDims[10] = {0};
@@ -779,7 +811,6 @@ direct_declarator:
     }
     | direct_declarator LPAREN { param_count_temp = 0; } parameter_type_list RPAREN {
         $$ = $1;
-        // param_count_temp is now set by parameter_list
     }
     ;
 
@@ -796,32 +827,35 @@ parameter_list:
     parameter_declaration {
         $$ = createNode(NODE_PARAMETER_LIST, "params");
         addChild($$, $1);
-        param_count_temp = 1;
+        // param_count_temp is now incremented in parameter_declaration when in_function_definition is set
     }
     | parameter_list COMMA parameter_declaration {
         $$ = $1;
         addChild($$, $3);
-        param_count_temp++;
+        // param_count_temp is now incremented in parameter_declaration when in_function_definition is set
     }
     ;
 
 parameter_declaration:
     declaration_specifiers declarator {
-        // Note: Parameters are inserted later when function scope is entered
-        // Store parameter info in AST node
+        // Store parameter information instead of inserting it immediately
+        // This allows us to differentiate between function declarations and definitions
         $$ = createNode(NODE_PARAMETER_DECLARATION, "param");
         addChild($$, $1);
         addChild($$, $2);
         
         // Extract identifier name and count pointer levels
         const char* paramName = extractIdentifierName($2);
-        if (paramName) {
+        if (paramName && pending_param_count < 32) {
             int ptrLevel = countPointerLevels($2);
             char fullType[256];
             buildFullType(fullType, currentType, ptrLevel);
             
-            // Insert into symbol table with full type
-            insertVariable(paramName, fullType, 0, NULL, 0, ptrLevel, 0);  // Parameters are not static
+            // Store parameter info for later insertion (if this is a definition)
+            strncpy(pending_params[pending_param_count].name, paramName, 255);
+            strncpy(pending_params[pending_param_count].type, fullType, 255);
+            pending_params[pending_param_count].ptrLevel = ptrLevel;
+            pending_param_count++;
         }
     }
     | declaration_specifiers abstract_declarator {
@@ -868,7 +902,7 @@ labeled_statement:
     IDENTIFIER COLON statement {
         if ($1 && $1->value) {
             /* emit("LABEL", ...) REMOVED */
-            insertSymbol($1->value, "label", 0, 0);  // Labels are not static
+            insertLabel($1->value);  // Insert as a label in the symbol table
         }
         $$ = createNode(NODE_LABELED_STATEMENT, "label");
         addChild($$, $1);
