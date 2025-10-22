@@ -5,15 +5,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <vector> // Add this
-#include <string> // Add this
+#include <vector>
+#include <string>
 
 using namespace std;
 
 // Struct to hold case label info
 struct CaseLabel {
-    char* value; // e.g., "1"
-    char* label; // e.g., "CASE_1"
+    char* value;
+    char* label;
 };
 
 // Control flow stacks
@@ -63,8 +63,6 @@ static char* getCurrentSwitchEnd() {
     return (switchDepth > 0) ? switchStack[switchDepth - 1].end_label : NULL;
 }
 
-// NEW HELPER: Recursively find a simple constant value from an expression node
-// This is a simplification; a full implementation would evaluate constant expressions.
 static char* get_constant_value_from_expression(TreeNode* node) {
     if (!node) return NULL;
     
@@ -86,7 +84,6 @@ static char* get_constant_value_from_expression(TreeNode* node) {
     return NULL; // Not a simple constant
 }
 
-// NEW HELPER: Traverses the AST for a switch body to find all case/default labels
 static void find_case_labels(TreeNode* node, std::vector<CaseLabel>& cases, char** default_label) {
     if (!node) return;
 
@@ -561,14 +558,14 @@ char* generate_ir(TreeNode* node) {
                     // Struct member assignment: struct.member = rhs
                     char* struct_var = lhs->children[0]->value;
                     char* member = lhs->children[1]->value;
-                    emit("ASSIGN_MEMBER", rhs_result, member, struct_var);
+                    emit("ASSIGN_MEMBER", member, struct_var, rhs_result);
                     return struct_var;
                 }
                 else if (lhs->type == NODE_POSTFIX_EXPRESSION && strcmp(lhs->value, "->") == 0) {
                     // Pointer member assignment: ptr->member = rhs
                     char* struct_ptr = generate_ir(lhs->children[0]);
                     char* member = lhs->children[1]->value;
-                    emit("ASSIGN_ARROW", rhs_result, member, struct_ptr);
+                    emit("ASSIGN_ARROW", member, struct_ptr, rhs_result);
                     return struct_ptr;
                 }
                 else if (lhs->type == NODE_POSTFIX_EXPRESSION && strcmp(lhs->value, "[]") == 0) {
@@ -959,7 +956,7 @@ char* generate_ir(TreeNode* node) {
                     TreeNode* args = node->children[1];
                     for (int i = 0; i < args->childCount; i++) {
                         char* arg = generate_ir(args->children[i]);
-                        emit("ARG", arg, "", "");
+                        emit("PARAM", arg, "", "");
                         arg_count++;
                     }
                 }
@@ -971,9 +968,6 @@ char* generate_ir(TreeNode* node) {
                 return temp;
             }
             else if (strcmp(node->value, ".") == 0) {
-                // Member access: struct.member
-                // For assignment contexts, this will be handled by assignment expression
-                // For value contexts, return the member value
                 char* struct_var = node->children[0]->value;
                 char* member = node->children[1]->value;
                 char* temp = newTemp();
@@ -981,9 +975,6 @@ char* generate_ir(TreeNode* node) {
                 return temp;
             }
             else if (strcmp(node->value, "->") == 0) {
-                // Arrow access: ptr->member
-                // For assignment contexts, this will be handled by assignment expression
-                // For value contexts, return the member value
                 char* struct_ptr = generate_ir(node->children[0]);
                 char* member = node->children[1]->value;
                 char* temp = newTemp();
@@ -991,7 +982,6 @@ char* generate_ir(TreeNode* node) {
                 return temp;
             }
             else if (strcmp(node->value, "++_post") == 0) {
-                // Post-increment
                 char* operand = node->children[0]->value;
                 char* temp = newTemp();
                 emit("ASSIGN", operand, "", temp);
@@ -1001,7 +991,6 @@ char* generate_ir(TreeNode* node) {
                 return temp;
             }
             else if (strcmp(node->value, "--_post") == 0) {
-                // Post-decrement
                 char* operand = node->children[0]->value;
                 char* temp = newTemp();
                 emit("ASSIGN", operand, "", temp);
@@ -1051,8 +1040,9 @@ char* generate_ir(TreeNode* node) {
                 
                 TreeNode* rhs = node->children[1];
                 
-                // Check if RHS has multiple children (indicating an array initializer list)
-                if (rhs->childCount > 1) {
+                // Check if RHS is specifically an initializer list (braced initialization)
+                // This should be distinguished from function calls or other multi-child expressions
+                if (rhs->childCount > 1 && rhs->type == NODE_INITIALIZER) {
                     // Array initialization: arr = {1, 2, 3}
                     for (int i = 0; i < rhs->childCount; i++) {
                         char* value = generate_ir(rhs->children[i]);
@@ -1062,7 +1052,7 @@ char* generate_ir(TreeNode* node) {
                     }
                     return lhs_name;
                 } else {
-                    // Simple initialization (including pointer initialization)
+                    // Simple initialization (including function calls, pointer initialization, etc.)
                     char* rhs_result = generate_ir(rhs); 
                     if (lhs_name && rhs_result) {
                         emit("ASSIGN", rhs_result, "", lhs_name);
