@@ -152,7 +152,7 @@ int getTypeSize(const char* type) {
     return 4;
 }
 
-void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level) {
+void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static) {
     if (symCount >= MAX_SYMBOLS) {
         cerr << "Error: Symbol table overflow" << endl;
         return;
@@ -179,14 +179,38 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
             strcat(fullType, dimStr);
         }
         strcpy(symtab[symCount].type, fullType);
-        strcpy(symtab[symCount].kind, "variable");  // Arrays are variables, not separate kind
+        if (is_static) {
+            strcpy(symtab[symCount].kind, "variable (static)");
+        } else {
+            strcpy(symtab[symCount].kind, "variable");
+        }
     } else if (ptr_level > 0) {
-        // Pointer already has * in type from parser
-        strcpy(symtab[symCount].type, type);
-        strcpy(symtab[symCount].kind, "pointer");
+        // Clean up pointer type - remove extra spaces between * symbols
+        char cleaned_type[256];
+        int src_idx = 0, dst_idx = 0;
+        while (type[src_idx] != '\0') {
+            if (type[src_idx] == ' ' && (src_idx == 0 || type[src_idx-1] == '*' || type[src_idx+1] == '*')) {
+                // Skip spaces adjacent to asterisks
+                src_idx++;
+            } else {
+                cleaned_type[dst_idx++] = type[src_idx++];
+            }
+        }
+        cleaned_type[dst_idx] = '\0';
+        
+        strcpy(symtab[symCount].type, cleaned_type);
+        if (is_static) {
+            strcpy(symtab[symCount].kind, "variable (static)");
+        } else {
+            strcpy(symtab[symCount].kind, "variable");
+        }
     } else {
         strcpy(symtab[symCount].type, type);
-        strcpy(symtab[symCount].kind, "variable");
+        if (is_static) {
+            strcpy(symtab[symCount].kind, "variable (static)");
+        } else {
+            strcpy(symtab[symCount].kind, "variable");
+        }
     }
     
     symtab[symCount].scope_level = current_scope;
@@ -196,6 +220,7 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
     symtab[symCount].ptr_level = ptr_level;
     symtab[symCount].is_function = 0;
     symtab[symCount].is_external = 0;  // Variables are never external
+    symtab[symCount].is_static = is_static;  // Set static flag
     
     // Set the function scope name
     strcpy(symtab[symCount].function_scope, current_function);
@@ -231,8 +256,25 @@ void insertParameter(const char* name, const char* type, int ptr_level) {
         }
     }
     
+    // Clean up pointer type - remove extra spaces between * symbols
+    char cleaned_type[256];
+    if (ptr_level > 0) {
+        int src_idx = 0, dst_idx = 0;
+        while (type[src_idx] != '\0') {
+            if (type[src_idx] == ' ' && (src_idx == 0 || type[src_idx-1] == '*' || type[src_idx+1] == '*')) {
+                // Skip spaces adjacent to asterisks
+                src_idx++;
+            } else {
+                cleaned_type[dst_idx++] = type[src_idx++];
+            }
+        }
+        cleaned_type[dst_idx] = '\0';
+    } else {
+        strcpy(cleaned_type, type);
+    }
+    
     strcpy(symtab[symCount].name, name);
-    strcpy(symtab[symCount].type, type);
+    strcpy(symtab[symCount].type, cleaned_type);
     strcpy(symtab[symCount].kind, "parameter");  // Mark as parameter, not variable
     symtab[symCount].scope_level = current_scope;
     symtab[symCount].parent_scope = (scope_depth > 0) ? parent_scopes[scope_depth - 1] : -1;
@@ -241,6 +283,7 @@ void insertParameter(const char* name, const char* type, int ptr_level) {
     symtab[symCount].ptr_level = ptr_level;
     symtab[symCount].is_function = 0;
     symtab[symCount].is_external = 0;  // Parameters are never external
+    symtab[symCount].is_static = 0;  // Parameters are never static
     
     // Set the function scope name
     strcpy(symtab[symCount].function_scope, current_function);
@@ -252,7 +295,7 @@ void insertParameter(const char* name, const char* type, int ptr_level) {
     symCount++;
 }
 
-void insertFunction(const char* name, const char* ret_type, int param_count, char params[][128], char param_names[][128]) {
+void insertFunction(const char* name, const char* ret_type, int param_count, char params[][128], char param_names[][128], int is_static) {
     if (symCount >= MAX_SYMBOLS) {
         cerr << "Error: Symbol table overflow" << endl;
         return;
@@ -260,13 +303,18 @@ void insertFunction(const char* name, const char* ret_type, int param_count, cha
     
     strcpy(symtab[symCount].name, name);
     strcpy(symtab[symCount].return_type, ret_type);
-    strcpy(symtab[symCount].kind, "function");
+    if (is_static) {
+        strcpy(symtab[symCount].kind, "function (static)");
+    } else {
+        strcpy(symtab[symCount].kind, "function");
+    }
     symtab[symCount].scope_level = 0;  // Functions are always at global scope
     symtab[symCount].parent_scope = -1; // No parent for global scope
     symtab[symCount].is_function = 1;
     symtab[symCount].param_count = param_count;
     strcpy(symtab[symCount].function_scope, "");  // Functions are in global scope
     symtab[symCount].is_external = 0;  // User-defined functions are not external
+    symtab[symCount].is_static = is_static;  // Set static flag
     symtab[symCount].size = 0;  // Functions have size 0
     
     if (params && param_names) {
@@ -287,7 +335,7 @@ void insertExternalFunction(const char* name, const char* ret_type) {
     
     // Determine correct return type for known library functions
     const char* actual_ret_type = ret_type;
-    char void_ptr_type[16] = "void *";
+    char void_ptr_type[16] = "void*";  // No space for consistency
     
     if (strcmp(name, "malloc") == 0 || strcmp(name, "calloc") == 0 || 
         strcmp(name, "realloc") == 0) {
@@ -299,13 +347,14 @@ void insertExternalFunction(const char* name, const char* ret_type) {
     
     strcpy(symtab[symCount].name, name);
     strcpy(symtab[symCount].return_type, actual_ret_type);
-    strcpy(symtab[symCount].kind, "function");
+    strcpy(symtab[symCount].kind, "function (external)");  // Mark as external in kind
     symtab[symCount].scope_level = 0;  // Functions are always at global scope
     symtab[symCount].parent_scope = -1; // No parent for global scope
     symtab[symCount].is_function = 1;
     symtab[symCount].param_count = 0;  // Don't know params for external functions
     strcpy(symtab[symCount].function_scope, "");  // Functions are in global scope
     symtab[symCount].is_external = 1;  // Mark as external/library function
+    symtab[symCount].is_static = 0;  // External functions are not static
     symtab[symCount].size = 0;  // Functions have size 0
     
     symCount++;
@@ -409,11 +458,11 @@ void markRecentSymbolsAsParameters(int count) {
     }
 }
 
-void insertSymbol(const char* name, const char* type, int is_function) {
+void insertSymbol(const char* name, const char* type, int is_function, int is_static) {
     if (is_function) {
-        insertFunction(name, type, 0, NULL, NULL);
+        insertFunction(name, type, 0, NULL, NULL, is_static);
     } else {
-        insertVariable(name, type, 0, NULL, 0, 0);
+        insertVariable(name, type, 0, NULL, 0, 0, is_static);
     }
 }
 
@@ -459,7 +508,6 @@ void setCurrentType(const char* type) {
 
 // Helper function to clean up typedef type display
 // Removes anonymous struct/union tags for cleaner output
-// Strips * from pointer types
 const char* getDisplayType(const Symbol* sym) {
     static char display_type[128];
     
@@ -477,18 +525,6 @@ const char* getDisplayType(const Symbol* sym) {
         }
     }
     
-    // If it's a pointer, strip the * for cleaner display
-    if (strcmp(sym->kind, "pointer") == 0) {
-        strcpy(display_type, sym->type);
-        // Remove all * and spaces from the end
-        int len = strlen(display_type);
-        while (len > 0 && (display_type[len-1] == '*' || display_type[len-1] == ' ')) {
-            display_type[len-1] = '\0';
-            len--;
-        }
-        return display_type;
-    }
-    
     // For all other cases, return the type as-is
     return sym->type;
 }
@@ -496,12 +532,12 @@ const char* getDisplayType(const Symbol* sym) {
 void printSymbolTable() {
     cout << "\n=== SYMBOL TABLE (Hierarchical Scope View) ===" << endl;
     cout << left << setw(20) << "Name"
-         << setw(22) << "Type"
-         << setw(14) << "Kind"
-         << setw(10) << "Scope"
-         << setw(12) << "Parent"
-         << setw(10) << "Size" << endl;
-    cout << "--------------------------------------------------------------------------------------" << endl;
+         << "  " << setw(20) << "Type"
+         << "  " << setw(20) << "Kind"
+         << "  " << right << setw(5) << "Scope"
+         << "  " << left << setw(10) << "Parent"
+         << "  " << right << setw(5) << "Size" << endl;
+    cout << "------------------------------------------------------------------------------------------------" << endl;
     
     // Print global scope (0)
     cout << ">>> GLOBAL SCOPE (0) <<<" << endl;
@@ -515,18 +551,18 @@ void printSymbolTable() {
             }
             
             cout << left << setw(20) << symtab[i].name
-                 << setw(22) << display_type
-                 << setw(14) << symtab[i].kind
-                 << setw(10) << symtab[i].scope_level;
+                 << "  " << setw(20) << display_type
+                 << "  " << setw(20) << symtab[i].kind
+                 << "  " << right << setw(5) << symtab[i].scope_level;
             
             // Show "external" for library functions, "none" for user-defined
             if (symtab[i].is_external) {
-                cout << setw(12) << "external";
+                cout << "  " << left << setw(10) << "external";
             } else {
-                cout << setw(12) << "none";
+                cout << "  " << left << setw(10) << "none";
             }
             
-            cout << setw(10) << symtab[i].size << endl;
+            cout << "  " << right << setw(5) << symtab[i].size << endl;
         }
     }
     
@@ -569,11 +605,11 @@ void printSymbolTable() {
                     for (int j = 0; j < symCount; j++) {
                         if (symtab[j].scope_level == 1 && strcmp(symtab[j].function_scope, func_name) == 0) {
                             cout << "  " << left << setw(18) << symtab[j].name
-                                 << setw(22) << getDisplayType(&symtab[j])
-                                 << setw(14) << symtab[j].kind
-                                 << setw(10) << symtab[j].scope_level
-                                 << setw(12) << func_name
-                                 << setw(10) << symtab[j].size << endl;
+                                 << "  " << setw(20) << getDisplayType(&symtab[j])
+                                 << "  " << setw(20) << symtab[j].kind
+                                 << "  " << right << setw(5) << symtab[j].scope_level
+                                 << "  " << left << setw(10) << func_name
+                                 << "  " << right << setw(5) << symtab[j].size << endl;
                         }
                     }
                 }
@@ -620,11 +656,11 @@ void printSymbolTable() {
                     for (int j = 0; j < symCount; j++) {
                         if (symtab[j].scope_level == 2 && strcmp(symtab[j].function_scope, func_name) == 0) {
                             cout << "    " << left << setw(16) << symtab[j].name
-                                 << setw(22) << getDisplayType(&symtab[j])
-                                 << setw(14) << symtab[j].kind
-                                 << setw(10) << symtab[j].scope_level
-                                 << setw(12) << symtab[j].parent_scope
-                                 << setw(10) << symtab[j].size << endl;
+                                 << "  " << setw(20) << getDisplayType(&symtab[j])
+                                 << "  " << setw(20) << symtab[j].kind
+                                 << "  " << right << setw(5) << symtab[j].scope_level
+                                 << "  " << left << setw(10) << func_name  // Show function name instead of numeric parent_scope
+                                 << "  " << right << setw(5) << symtab[j].size << endl;
                         }
                     }
                 }
@@ -640,6 +676,6 @@ void printSymbolTable() {
         }
     }
     
-    cout << "--------------------------------------------------------------------------------------" << endl;
+    cout << "------------------------------------------------------------------------------------------------" << endl;
     cout << "Total symbols: " << symCount << " | Max scope level: " << max_scope << endl << endl;
 }

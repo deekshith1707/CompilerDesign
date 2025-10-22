@@ -13,14 +13,27 @@ extern int yylineno;
 extern char* yytext;
 extern FILE* yyin;
 int error_count = 0;
+int semantic_error_count = 0;
 static int anonymous_union_counter = 0;
 static int anonymous_struct_counter = 0;
 int recovering_from_error = 0;
 int in_typedef = 0;
+int is_static = 0;  // Flag to track if current declaration is static
 int in_function_body = 0;  // Flag to track if we're in a function body compound statement
 int param_count_temp = 0;  // Temporary counter for function parameters
 int parsing_function_decl = 0;  // Flag to indicate we're parsing a function declaration
+int in_function_definition = 0;  // Flag to indicate we're parsing a function definition (not just a declaration)
 char function_return_type[128] = "int";  // Save function return type before parsing parameters
+
+// Structure to store parameter information during parsing
+typedef struct {
+    char name[256];
+    char type[256];
+    int ptrLevel;
+} ParamInfo;
+
+ParamInfo pending_params[32];  // Store up to 32 parameters
+int pending_param_count = 0;
 
 // Global AST root, to be passed to the IR generator
 TreeNode* ast_root = NULL;
@@ -28,6 +41,26 @@ TreeNode* ast_root = NULL;
 // Forward declarations
 extern int yylex();
 void yyerror(const char* msg);
+void semantic_error(const char* msg);
+
+// Helper function to check if a node is an lvalue
+int isLValue(TreeNode* node) {
+    if (!node) return 0;
+    // Variables, array accesses, and dereferenced pointers are lvalues
+    if (node->type == NODE_IDENTIFIER) return 1;
+    if (node->isLValue) return 1;
+    if (node->type == NODE_POSTFIX_EXPRESSION && strcmp(node->value, "[]") == 0) return 1;
+    if (node->type == NODE_UNARY_EXPRESSION && strcmp(node->value, "*") == 0) return 1;
+    if (node->type == NODE_POSTFIX_EXPRESSION && strcmp(node->value, "->") == 0) return 1;
+    if (node->type == NODE_POSTFIX_EXPRESSION && strcmp(node->value, ".") == 0) return 1;
+    return 0;
+}
+
+// Helper function to check if a type is a pointer
+int isPointerType(const char* type) {
+    if (!type) return 0;
+    return (strchr(type, '*') != NULL);
+}
 
 // Helper function to count pointer levels in a declarator tree
 int countPointerLevels(TreeNode* node) {
@@ -212,6 +245,23 @@ int hasArrayBrackets(TreeNode* node) {
     return 0;
 }
 
+// Helper function to check if a declarator is a function declarator (has parameters)
+int isFunctionDeclarator(TreeNode* node) {
+    if (!node) return 0;
+    
+    // Check if this node has NODE_PARAMETER_LIST as a child
+    for (int i = 0; i < node->childCount; i++) {
+        if (node->children[i] && node->children[i]->type == NODE_PARAMETER_LIST) {
+            return 1;
+        }
+        // Recursively check children
+        if (isFunctionDeclarator(node->children[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 %}
 
 /* =================================================================== */
@@ -312,7 +362,9 @@ program:
         $$ = createNode(NODE_PROGRAM, "program");
         addChild($$, $1);
         ast_root = $$; // Set the global AST root
-        printf("\n=== PARSING COMPLETED SUCCESSFULLY ===\n");
+        if (error_count == 0) {
+            printf("\n=== PARSING COMPLETED SUCCESSFULLY ===\n");
+        }
     }
     ;
 
@@ -340,46 +392,47 @@ preprocessor_directive:
 function_definition:
     declaration_specifiers declarator
     {
-        // Save function return type NOW (from declaration_specifiers)
-        // It might have been overwritten during parameter parsing
-        // So we look at what was set initially
+        // Now we know it's a definition (has compound_statement coming)
+        // Extract function name
         const char* funcName = extractIdentifierName($2);
         if (funcName) {
-            // Check if we need to correct the type
-            // Look backwards to find what type was set for the function's declaration_specifiers
-            // For now, let's use a simpler approach - check if there's an IDENTIFIER node type
-            // Actually, let's extract the type from the declaration_specifiers AST node
+            // Extract return type from declaration_specifiers
             char funcRetType[128];
-            strcpy(funcRetType, currentType);  // Default to currentType
+            strcpy(funcRetType, currentType);
             
             // Try to find the base type from declaration_specifiers
             if ($1 && $1->childCount > 0) {
                 for (int i = 0; i < $1->childCount; i++) {
                     TreeNode* spec = $1->children[i];
                     if (spec && spec->value) {
-                        // Check if it's a type specifier
                         if (strcmp(spec->value, "int") == 0 || 
                             strcmp(spec->value, "char") == 0 ||
                             strcmp(spec->value, "void") == 0 ||
                             strcmp(spec->value, "float") == 0 ||
                             strcmp(spec->value, "double") == 0) {
                             strcpy(funcRetType, spec->value);
-                            break;  // Use the first type specifier found
+                            break;
                         }
                     }
                 }
             }
             
-            insertSymbol(funcName, funcRetType, 1);
+            insertSymbol(funcName, funcRetType, 1, is_static);
         }
-        // Enter function scope for parameters and local variables
-        // Each function gets its own unique scope
+        is_static = 0;
+        // Enter function scope
         enterFunctionScope(funcName);
-        // Move parameters from global scope (0) to function scope
-        moveRecentSymbolsToCurrentScope(param_count_temp);
-        // Mark them as parameters (not variables)
-        markRecentSymbolsAsParameters(param_count_temp);
-        in_function_body = 1;  // Mark that we're entering function body
+        
+        // Now insert the pending parameters that were stored during parsing
+        for (int i = 0; i < pending_param_count; i++) {
+            insertVariable(pending_params[i].name, pending_params[i].type, 0, NULL, 0, pending_params[i].ptrLevel, 0);
+        }
+        // Mark them as parameters
+        markRecentSymbolsAsParameters(pending_param_count);
+        param_count_temp = pending_param_count;  // Update param_count_temp for IR generation
+        pending_param_count = 0;  // Reset for next function
+        
+        in_function_body = 1;
     }
     compound_statement
     {
@@ -388,8 +441,9 @@ function_definition:
         addChild($$, $2); // declarator (name)
         addChild($$, $4); // compound_statement (body)
         
-        in_function_body = 0;  // Exiting function body
-        exitFunctionScope(); // Exit the function's scope
+        in_function_body = 0;
+        param_count_temp = 0;
+        exitFunctionScope();
         recovering_from_error = 0;
     }
     ;
@@ -399,14 +453,18 @@ declaration:
         $$ = createNode(NODE_DECLARATION, "declaration");
         addChild($$, $1);
         in_typedef = 0;
+        is_static = 0;
         recovering_from_error = 0;
+        pending_param_count = 0;  // Reset pending parameters (in case this was a function declaration)
     }
     | declaration_specifiers init_declarator_list SEMICOLON {
         $$ = createNode(NODE_DECLARATION, "declaration");
         addChild($$, $1);
         addChild($$, $2);
         in_typedef = 0;
+        is_static = 0;
         recovering_from_error = 0;
+        pending_param_count = 0;  // Reset pending parameters (in case this was a function declaration)
     }
     ;
 
@@ -435,7 +493,10 @@ storage_class_specifier:
         $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "typedef");
     }
     | EXTERN { $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "extern"); }
-    | STATIC { $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "static"); }
+    | STATIC {
+        is_static = 1;
+        $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "static");
+    }
     | AUTO { $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "auto"); }
     | REGISTER { $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "register"); }
     ;
@@ -613,7 +674,7 @@ enumerator:
     IDENTIFIER {
         if ($1 && $1->value) {
             // Enum constants are integers, so size is 4 bytes
-            insertVariable($1->value, "int", 0, NULL, 0, 0);
+            insertVariable($1->value, "int", 0, NULL, 0, 0, 0);  // Enum constants are not static
             // Update the last inserted symbol's kind to enum_constant
             if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
                 strcpy(symtab[symCount - 1].kind, "enum_constant");
@@ -624,7 +685,7 @@ enumerator:
     | IDENTIFIER ASSIGN constant_expression {
         if ($1 && $1->value) {
             // Enum constants are integers, so size is 4 bytes
-            insertVariable($1->value, "int", 0, NULL, 0, 0);
+            insertVariable($1->value, "int", 0, NULL, 0, 0, 0);  // Enum constants are not static
             // Update the last inserted symbol's kind to enum_constant
             if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
                 strcpy(symtab[symCount - 1].kind, "enum_constant");
@@ -648,7 +709,8 @@ init_declarator_list:
 init_declarator:
     declarator {
         const char* varName = extractIdentifierName($1);
-        if (varName) {
+        // Skip insertion for function declarators (pending_param_count > 0 means we just parsed parameters)
+        if (varName && pending_param_count == 0) {
             int ptrLevel = countPointerLevels($1);
             int isArray = hasArrayBrackets($1);
             int arrayDims[10] = {0};
@@ -663,12 +725,12 @@ init_declarator:
             
             if (in_typedef) {
                 // Insert the symbol and then manually set its kind to "typedef".
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel);
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, 0);  // Typedefs are not static
                 if (symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                     strcpy(symtab[symCount - 1].kind, "typedef");
                 }
             } else {
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel);
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
             }
         }
         $$ = $1;
@@ -687,7 +749,7 @@ init_declarator:
             
             char fullType[256];
             buildFullType(fullType, currentType, ptrLevel);
-            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel);
+            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
             /* emit("ASSIGN", ...) REMOVED */
         }
         
@@ -749,7 +811,6 @@ direct_declarator:
     }
     | direct_declarator LPAREN { param_count_temp = 0; } parameter_type_list RPAREN {
         $$ = $1;
-        // param_count_temp is now set by parameter_list
     }
     ;
 
@@ -766,32 +827,35 @@ parameter_list:
     parameter_declaration {
         $$ = createNode(NODE_PARAMETER_LIST, "params");
         addChild($$, $1);
-        param_count_temp = 1;
+        // param_count_temp is now incremented in parameter_declaration when in_function_definition is set
     }
     | parameter_list COMMA parameter_declaration {
         $$ = $1;
         addChild($$, $3);
-        param_count_temp++;
+        // param_count_temp is now incremented in parameter_declaration when in_function_definition is set
     }
     ;
 
 parameter_declaration:
     declaration_specifiers declarator {
-        // Note: Parameters are inserted later when function scope is entered
-        // Store parameter info in AST node
+        // Store parameter information instead of inserting it immediately
+        // This allows us to differentiate between function declarations and definitions
         $$ = createNode(NODE_PARAMETER_DECLARATION, "param");
         addChild($$, $1);
         addChild($$, $2);
         
         // Extract identifier name and count pointer levels
         const char* paramName = extractIdentifierName($2);
-        if (paramName) {
+        if (paramName && pending_param_count < 32) {
             int ptrLevel = countPointerLevels($2);
             char fullType[256];
             buildFullType(fullType, currentType, ptrLevel);
             
-            // Insert into symbol table with full type
-            insertVariable(paramName, fullType, 0, NULL, 0, ptrLevel);
+            // Store parameter info for later insertion (if this is a definition)
+            strncpy(pending_params[pending_param_count].name, paramName, 255);
+            strncpy(pending_params[pending_param_count].type, fullType, 255);
+            pending_params[pending_param_count].ptrLevel = ptrLevel;
+            pending_param_count++;
         }
     }
     | declaration_specifiers abstract_declarator {
@@ -838,7 +902,7 @@ labeled_statement:
     IDENTIFIER COLON statement {
         if ($1 && $1->value) {
             /* emit("LABEL", ...) REMOVED */
-            insertSymbol($1->value, "label", 0);
+            insertLabel($1->value);  // Insert as a label in the symbol table
         }
         $$ = createNode(NODE_LABELED_STATEMENT, "label");
         addChild($$, $1);
@@ -1063,15 +1127,15 @@ assignment_expression:
     }
     | unary_expression ASSIGN assignment_expression {
         /* 1. Semantic Checks */
-        if (!$1->isLValue) {
-            yyerror("Left side of assignment must be an lvalue");
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as left operand of assignment");
         }
         
         if ($1->dataType && $3->dataType && !isAssignable($1->dataType, $3->dataType)) {
             char err_msg[256];
-            sprintf(err_msg, "Type mismatch in assignment: cannot assign %s to %s",
-                    $3->dataType, $1->dataType);
-            yyerror(err_msg);
+            sprintf(err_msg, "incompatible types when assigning to type '%s' from type '%s'",
+                    $1->dataType, $3->dataType);
+            semantic_error(err_msg);
         }
         
         /* 2. Build Node */
@@ -1085,24 +1149,36 @@ assignment_expression:
         /* All emit, convertType, and tacResult logic REMOVED */
     }
     | unary_expression PLUS_ASSIGN assignment_expression {
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as left operand of assignment");
+        }
         $$ = createNode(NODE_ASSIGNMENT_EXPRESSION, "+=");
         addChild($$, $1);
         addChild($$, $3);
         $$->dataType = $1->dataType ? strdup($1->dataType) : NULL;
     }
     | unary_expression MINUS_ASSIGN assignment_expression {
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as left operand of assignment");
+        }
         $$ = createNode(NODE_ASSIGNMENT_EXPRESSION, "-=");
         addChild($$, $1);
         addChild($$, $3);
         $$->dataType = $1->dataType ? strdup($1->dataType) : NULL;
     }
     | unary_expression MUL_ASSIGN assignment_expression {
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as left operand of assignment");
+        }
         $$ = createNode(NODE_ASSIGNMENT_EXPRESSION, "*=");
         addChild($$, $1);
         addChild($$, $3);
         $$->dataType = $1->dataType ? strdup($1->dataType) : NULL;
     }
     | unary_expression DIV_ASSIGN assignment_expression {
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as left operand of assignment");
+        }
         $$ = createNode(NODE_ASSIGNMENT_EXPRESSION, "/=");
         addChild($$, $1);
         addChild($$, $3);
@@ -1454,8 +1530,8 @@ unary_expression:
         $$ = $1;
     }
     | INCREMENT unary_expression {
-        if (!$2->isLValue) {
-            yyerror("Increment requires lvalue");
+        if (!isLValue($2)) {
+            semantic_error("lvalue required as increment operand");
         }
         /* newTemp(), emit("ADD"), emit("ASSIGN") REMOVED */
         $$ = createNode(NODE_UNARY_EXPRESSION, "++_pre");
@@ -1464,8 +1540,8 @@ unary_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | DECREMENT unary_expression {
-        if (!$2->isLValue) {
-            yyerror("Decrement requires lvalue");
+        if (!isLValue($2)) {
+            semantic_error("lvalue required as decrement operand");
         }
         /* newTemp(), emit("SUB"), emit("ASSIGN") REMOVED */
         $$ = createNode(NODE_UNARY_EXPRESSION, "--_pre");
@@ -1474,6 +1550,9 @@ unary_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | BITWISE_AND cast_expression {
+        if (!isLValue($2)) {
+            semantic_error("lvalue required as unary '&' operand");
+        }
         /* newTemp(), emit("ADDR") REMOVED */
         $$ = createNode(NODE_UNARY_EXPRESSION, "&");
         addChild($$, $2);
@@ -1482,6 +1561,9 @@ unary_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | MULTIPLY cast_expression {
+        if ($2->dataType && !isPointerType($2->dataType)) {
+            semantic_error("invalid type argument of unary '*' (have non-pointer type)");
+        }
         /* newTemp(), emit("DEREF") REMOVED */
         $$ = createNode(NODE_UNARY_EXPRESSION, "*");
         addChild($$, $2);
@@ -1599,8 +1681,8 @@ postfix_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | postfix_expression INCREMENT {
-        if (!$1->isLValue) {
-            yyerror("Post-increment requires lvalue");
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as increment operand");
         }
         /* newTemp(), emit("ASSIGN"), emit("ADD"), emit("ASSIGN") REMOVED */
         $$ = createNode(NODE_POSTFIX_EXPRESSION, "++_post");
@@ -1609,8 +1691,8 @@ postfix_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | postfix_expression DECREMENT {
-        if (!$1->isLValue) {
-            yyerror("Post-decrement requires lvalue");
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as decrement operand");
         }
         /* newTemp(), emit("ASSIGN"), emit("SUB"), emit("ASSIGN") REMOVED */
         $$ = createNode(NODE_POSTFIX_EXPRESSION, "--_post");
@@ -1704,8 +1786,18 @@ argument_expression_list:
 
 void yyerror(const char* msg) {
     if (!recovering_from_error) {
-        fprintf(stderr, "Syntax Error on line %d: %s at '%s'\n", yylineno, msg, yytext);
+        fprintf(stderr, "Syntax Error on line %d: %s", yylineno, msg);
+        if (yytext && strlen(yytext) > 0) {
+            fprintf(stderr, " at '%s'", yytext);
+        }
+        fprintf(stderr, "\n");
         error_count++;
         recovering_from_error = 1;
     }
+}
+
+void semantic_error(const char* msg) {
+    fprintf(stderr, "Semantic Error on line %d: %s\n", yylineno, msg);
+    semantic_error_count++;
+    error_count++;
 }

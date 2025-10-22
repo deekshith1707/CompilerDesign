@@ -29,10 +29,11 @@ int main(int argc, char **argv) {
     }
 
     cout << "============================================" << endl;
-    cout << "      C++ COMPILER - SYNTAX ANALYZER" << endl;
+    cout << "  C/C++ COMPILER - SYNTAX/SEMANTIC ANALYZER" << endl;
     cout << "============================================" << endl;
     cout << "Input file: " << argv[1] << endl;
     cout << "============================================" << endl;
+    cout << endl;
 
     if (yyparse() == 0 && error_count == 0) { // yyparse() returns 0 on success
         cout << "\n=== PARSING SUCCESSFUL ===" << endl;
@@ -60,8 +61,10 @@ int main(int argc, char **argv) {
         }
 
     } else {
-        cout << "\n=== PARSING FAILED ===" << endl;
-        cout << "Total errors: " << error_count << endl;
+        cout << "=== PARSING FAILED ===" << endl;
+        if (error_count > 0) {
+            cout << "Total errors: " << error_count << endl;
+        }
     }
 
     fclose(yyin);
