@@ -13,6 +13,7 @@ extern int yylineno;
 extern char* yytext;
 extern FILE* yyin;
 int error_count = 0;
+int semantic_error_count = 0;
 static int anonymous_union_counter = 0;
 static int anonymous_struct_counter = 0;
 int recovering_from_error = 0;
@@ -29,6 +30,26 @@ TreeNode* ast_root = NULL;
 // Forward declarations
 extern int yylex();
 void yyerror(const char* msg);
+void semantic_error(const char* msg);
+
+// Helper function to check if a node is an lvalue
+int isLValue(TreeNode* node) {
+    if (!node) return 0;
+    // Variables, array accesses, and dereferenced pointers are lvalues
+    if (node->type == NODE_IDENTIFIER) return 1;
+    if (node->isLValue) return 1;
+    if (node->type == NODE_POSTFIX_EXPRESSION && strcmp(node->value, "[]") == 0) return 1;
+    if (node->type == NODE_UNARY_EXPRESSION && strcmp(node->value, "*") == 0) return 1;
+    if (node->type == NODE_POSTFIX_EXPRESSION && strcmp(node->value, "->") == 0) return 1;
+    if (node->type == NODE_POSTFIX_EXPRESSION && strcmp(node->value, ".") == 0) return 1;
+    return 0;
+}
+
+// Helper function to check if a type is a pointer
+int isPointerType(const char* type) {
+    if (!type) return 0;
+    return (strchr(type, '*') != NULL);
+}
 
 // Helper function to count pointer levels in a declarator tree
 int countPointerLevels(TreeNode* node) {
@@ -313,7 +334,9 @@ program:
         $$ = createNode(NODE_PROGRAM, "program");
         addChild($$, $1);
         ast_root = $$; // Set the global AST root
-        printf("\n=== PARSING COMPLETED SUCCESSFULLY ===\n");
+        if (error_count == 0) {
+            printf("\n=== PARSING COMPLETED SUCCESSFULLY ===\n");
+        }
     }
     ;
 
@@ -1070,15 +1093,15 @@ assignment_expression:
     }
     | unary_expression ASSIGN assignment_expression {
         /* 1. Semantic Checks */
-        if (!$1->isLValue) {
-            yyerror("Left side of assignment must be an lvalue");
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as left operand of assignment");
         }
         
         if ($1->dataType && $3->dataType && !isAssignable($1->dataType, $3->dataType)) {
             char err_msg[256];
-            sprintf(err_msg, "Type mismatch in assignment: cannot assign %s to %s",
-                    $3->dataType, $1->dataType);
-            yyerror(err_msg);
+            sprintf(err_msg, "incompatible types when assigning to type '%s' from type '%s'",
+                    $1->dataType, $3->dataType);
+            semantic_error(err_msg);
         }
         
         /* 2. Build Node */
@@ -1092,24 +1115,36 @@ assignment_expression:
         /* All emit, convertType, and tacResult logic REMOVED */
     }
     | unary_expression PLUS_ASSIGN assignment_expression {
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as left operand of assignment");
+        }
         $$ = createNode(NODE_ASSIGNMENT_EXPRESSION, "+=");
         addChild($$, $1);
         addChild($$, $3);
         $$->dataType = $1->dataType ? strdup($1->dataType) : NULL;
     }
     | unary_expression MINUS_ASSIGN assignment_expression {
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as left operand of assignment");
+        }
         $$ = createNode(NODE_ASSIGNMENT_EXPRESSION, "-=");
         addChild($$, $1);
         addChild($$, $3);
         $$->dataType = $1->dataType ? strdup($1->dataType) : NULL;
     }
     | unary_expression MUL_ASSIGN assignment_expression {
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as left operand of assignment");
+        }
         $$ = createNode(NODE_ASSIGNMENT_EXPRESSION, "*=");
         addChild($$, $1);
         addChild($$, $3);
         $$->dataType = $1->dataType ? strdup($1->dataType) : NULL;
     }
     | unary_expression DIV_ASSIGN assignment_expression {
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as left operand of assignment");
+        }
         $$ = createNode(NODE_ASSIGNMENT_EXPRESSION, "/=");
         addChild($$, $1);
         addChild($$, $3);
@@ -1461,8 +1496,8 @@ unary_expression:
         $$ = $1;
     }
     | INCREMENT unary_expression {
-        if (!$2->isLValue) {
-            yyerror("Increment requires lvalue");
+        if (!isLValue($2)) {
+            semantic_error("lvalue required as increment operand");
         }
         /* newTemp(), emit("ADD"), emit("ASSIGN") REMOVED */
         $$ = createNode(NODE_UNARY_EXPRESSION, "++_pre");
@@ -1471,8 +1506,8 @@ unary_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | DECREMENT unary_expression {
-        if (!$2->isLValue) {
-            yyerror("Decrement requires lvalue");
+        if (!isLValue($2)) {
+            semantic_error("lvalue required as decrement operand");
         }
         /* newTemp(), emit("SUB"), emit("ASSIGN") REMOVED */
         $$ = createNode(NODE_UNARY_EXPRESSION, "--_pre");
@@ -1481,6 +1516,9 @@ unary_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | BITWISE_AND cast_expression {
+        if (!isLValue($2)) {
+            semantic_error("lvalue required as unary '&' operand");
+        }
         /* newTemp(), emit("ADDR") REMOVED */
         $$ = createNode(NODE_UNARY_EXPRESSION, "&");
         addChild($$, $2);
@@ -1489,6 +1527,9 @@ unary_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | MULTIPLY cast_expression {
+        if ($2->dataType && !isPointerType($2->dataType)) {
+            semantic_error("invalid type argument of unary '*' (have non-pointer type)");
+        }
         /* newTemp(), emit("DEREF") REMOVED */
         $$ = createNode(NODE_UNARY_EXPRESSION, "*");
         addChild($$, $2);
@@ -1606,8 +1647,8 @@ postfix_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | postfix_expression INCREMENT {
-        if (!$1->isLValue) {
-            yyerror("Post-increment requires lvalue");
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as increment operand");
         }
         /* newTemp(), emit("ASSIGN"), emit("ADD"), emit("ASSIGN") REMOVED */
         $$ = createNode(NODE_POSTFIX_EXPRESSION, "++_post");
@@ -1616,8 +1657,8 @@ postfix_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | postfix_expression DECREMENT {
-        if (!$1->isLValue) {
-            yyerror("Post-decrement requires lvalue");
+        if (!isLValue($1)) {
+            semantic_error("lvalue required as decrement operand");
         }
         /* newTemp(), emit("ASSIGN"), emit("SUB"), emit("ASSIGN") REMOVED */
         $$ = createNode(NODE_POSTFIX_EXPRESSION, "--_post");
@@ -1711,8 +1752,18 @@ argument_expression_list:
 
 void yyerror(const char* msg) {
     if (!recovering_from_error) {
-        fprintf(stderr, "Syntax Error on line %d: %s at '%s'\n", yylineno, msg, yytext);
+        fprintf(stderr, "Syntax Error on line %d: %s", yylineno, msg);
+        if (yytext && strlen(yytext) > 0) {
+            fprintf(stderr, " at '%s'", yytext);
+        }
+        fprintf(stderr, "\n");
         error_count++;
         recovering_from_error = 1;
     }
+}
+
+void semantic_error(const char* msg) {
+    fprintf(stderr, "Semantic Error on line %d: %s\n", yylineno, msg);
+    semantic_error_count++;
+    error_count++;
 }
