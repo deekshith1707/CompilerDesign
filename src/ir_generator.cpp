@@ -5,15 +5,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <vector> // Add this
-#include <string> // Add this
+#include <vector>
+#include <string>
 
 using namespace std;
 
 // Struct to hold case label info
 struct CaseLabel {
-    char* value; // e.g., "1"
-    char* label; // e.g., "CASE_1"
+    char* value;
+    char* label;
 };
 
 // Control flow stacks
@@ -63,8 +63,6 @@ static char* getCurrentSwitchEnd() {
     return (switchDepth > 0) ? switchStack[switchDepth - 1].end_label : NULL;
 }
 
-// NEW HELPER: Recursively find a simple constant value from an expression node
-// This is a simplification; a full implementation would evaluate constant expressions.
 static char* get_constant_value_from_expression(TreeNode* node) {
     if (!node) return NULL;
     
@@ -86,7 +84,6 @@ static char* get_constant_value_from_expression(TreeNode* node) {
     return NULL; // Not a simple constant
 }
 
-// NEW HELPER: Traverses the AST for a switch body to find all case/default labels
 static void find_case_labels(TreeNode* node, std::vector<CaseLabel>& cases, char** default_label) {
     if (!node) return;
 
@@ -971,9 +968,6 @@ char* generate_ir(TreeNode* node) {
                 return temp;
             }
             else if (strcmp(node->value, ".") == 0) {
-                // Member access: struct.member
-                // For assignment contexts, this will be handled by assignment expression
-                // For value contexts, return the member value
                 char* struct_var = node->children[0]->value;
                 char* member = node->children[1]->value;
                 char* temp = newTemp();
@@ -981,9 +975,6 @@ char* generate_ir(TreeNode* node) {
                 return temp;
             }
             else if (strcmp(node->value, "->") == 0) {
-                // Arrow access: ptr->member
-                // For assignment contexts, this will be handled by assignment expression
-                // For value contexts, return the member value
                 char* struct_ptr = generate_ir(node->children[0]);
                 char* member = node->children[1]->value;
                 char* temp = newTemp();
@@ -991,7 +982,6 @@ char* generate_ir(TreeNode* node) {
                 return temp;
             }
             else if (strcmp(node->value, "++_post") == 0) {
-                // Post-increment
                 char* operand = node->children[0]->value;
                 char* temp = newTemp();
                 emit("ASSIGN", operand, "", temp);
@@ -1001,7 +991,6 @@ char* generate_ir(TreeNode* node) {
                 return temp;
             }
             else if (strcmp(node->value, "--_post") == 0) {
-                // Post-decrement
                 char* operand = node->children[0]->value;
                 char* temp = newTemp();
                 emit("ASSIGN", operand, "", temp);
