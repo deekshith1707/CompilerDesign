@@ -45,6 +45,7 @@ typedef struct Symbol {
     char param_names[16][128];
     char function_scope[128];  // Name of function this symbol belongs to (for non-global scopes)
     int is_external;           // 1 if this is an external/library function (e.g., printf)
+    int is_static;             // 1 if this has static storage class (internal linkage)
 } Symbol;
 
 // Global symbol table
@@ -67,9 +68,9 @@ extern StructDef unionTable[MAX_STRUCTS];
 extern int unionCount;
 
 // Function prototypes
-void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level);
+void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static);
 void insertParameter(const char* name, const char* type, int ptr_level);  // For function parameters
-void insertFunction(const char* name, const char* ret_type, int param_count, char params[][128], char param_names[][128]);
+void insertFunction(const char* name, const char* ret_type, int param_count, char params[][128], char param_names[][128], int is_static);
 void insertExternalFunction(const char* name, const char* ret_type);  // For library/external functions
 void insertStruct(const char* name, StructMember* members, int member_count);
 void insertUnion(const char* name, StructMember* members, int member_count);
@@ -82,7 +83,7 @@ void enterScope();
 void exitScope();
 void enterFunctionScope(const char* func_name);  // Enter scope for a specific function
 void exitFunctionScope();
-void insertSymbol(const char* name, const char* type, int is_function);
+void insertSymbol(const char* name, const char* type, int is_function, int is_static);
 void moveRecentSymbolsToCurrentScope(int count);  // Move last N non-function symbols to current scope
 void markRecentSymbolsAsParameters(int count);    // Mark last N symbols as parameters
 int is_type_name(const char* name);
