@@ -360,6 +360,29 @@ void insertExternalFunction(const char* name, const char* ret_type) {
     symCount++;
 }
 
+void insertLabel(const char* name) {
+    if (symCount >= MAX_SYMBOLS) {
+        fprintf(stderr, "Error: Symbol table overflow\n");
+        return;
+    }
+    
+    strcpy(symtab[symCount].name, name);
+    strcpy(symtab[symCount].type, "-");  // Labels don't have a type
+    strcpy(symtab[symCount].kind, "label");
+    symtab[symCount].scope_level = current_scope;
+    symtab[symCount].parent_scope = (scope_depth > 0) ? parent_scopes[scope_depth - 1] : -1;
+    symtab[symCount].is_function = 0;
+    symtab[symCount].is_array = 0;
+    symtab[symCount].ptr_level = 0;
+    symtab[symCount].num_dims = 0;
+    strcpy(symtab[symCount].function_scope, current_function);
+    symtab[symCount].is_external = 0;
+    symtab[symCount].is_static = 0;
+    symtab[symCount].size = 0;  // Labels don't occupy storage
+    
+    symCount++;
+}
+
 Symbol* lookupSymbol(const char* name) {
     // Search from innermost scope outward to global scope
     for (int i = symCount - 1; i >= 0; i--) {
@@ -562,7 +585,12 @@ void printSymbolTable() {
                 cout << "  " << left << setw(10) << "none";
             }
             
-            cout << "  " << right << setw(5) << symtab[i].size << endl;
+            // Show "-" for labels, actual size for others
+            if (strcmp(symtab[i].kind, "label") == 0) {
+                cout << "  " << right << setw(5) << "-" << endl;
+            } else {
+                cout << "  " << right << setw(5) << symtab[i].size << endl;
+            }
         }
     }
     
@@ -608,8 +636,14 @@ void printSymbolTable() {
                                  << "  " << setw(20) << getDisplayType(&symtab[j])
                                  << "  " << setw(20) << symtab[j].kind
                                  << "  " << right << setw(5) << symtab[j].scope_level
-                                 << "  " << left << setw(10) << func_name
-                                 << "  " << right << setw(5) << symtab[j].size << endl;
+                                 << "  " << left << setw(10) << func_name;
+                            
+                            // Show "-" for labels, actual size for others
+                            if (strcmp(symtab[j].kind, "label") == 0) {
+                                cout << "  " << right << setw(5) << "-" << endl;
+                            } else {
+                                cout << "  " << right << setw(5) << symtab[j].size << endl;
+                            }
                         }
                     }
                 }
@@ -659,8 +693,14 @@ void printSymbolTable() {
                                  << "  " << setw(20) << getDisplayType(&symtab[j])
                                  << "  " << setw(20) << symtab[j].kind
                                  << "  " << right << setw(5) << symtab[j].scope_level
-                                 << "  " << left << setw(10) << func_name  // Show function name instead of numeric parent_scope
-                                 << "  " << right << setw(5) << symtab[j].size << endl;
+                                 << "  " << left << setw(10) << func_name;  // Show function name instead of numeric parent_scope
+                            
+                            // Show "-" for labels, actual size for others
+                            if (strcmp(symtab[j].kind, "label") == 0) {
+                                cout << "  " << right << setw(5) << "-" << endl;
+                            } else {
+                                cout << "  " << right << setw(5) << symtab[j].size << endl;
+                            }
                         }
                     }
                 }
