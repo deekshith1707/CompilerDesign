@@ -17,6 +17,7 @@ static int anonymous_union_counter = 0;
 static int anonymous_struct_counter = 0;
 int recovering_from_error = 0;
 int in_typedef = 0;
+int is_static = 0;  // Flag to track if current declaration is static
 int in_function_body = 0;  // Flag to track if we're in a function body compound statement
 int param_count_temp = 0;  // Temporary counter for function parameters
 int parsing_function_decl = 0;  // Flag to indicate we're parsing a function declaration
@@ -370,8 +371,9 @@ function_definition:
                 }
             }
             
-            insertSymbol(funcName, funcRetType, 1);
+            insertSymbol(funcName, funcRetType, 1, is_static);
         }
+        is_static = 0;  // Reset static flag after processing function declaration
         // Enter function scope for parameters and local variables
         // Each function gets its own unique scope
         enterFunctionScope(funcName);
@@ -399,6 +401,7 @@ declaration:
         $$ = createNode(NODE_DECLARATION, "declaration");
         addChild($$, $1);
         in_typedef = 0;
+        is_static = 0;
         recovering_from_error = 0;
     }
     | declaration_specifiers init_declarator_list SEMICOLON {
@@ -406,6 +409,7 @@ declaration:
         addChild($$, $1);
         addChild($$, $2);
         in_typedef = 0;
+        is_static = 0;
         recovering_from_error = 0;
     }
     ;
@@ -435,7 +439,10 @@ storage_class_specifier:
         $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "typedef");
     }
     | EXTERN { $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "extern"); }
-    | STATIC { $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "static"); }
+    | STATIC {
+        is_static = 1;
+        $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "static");
+    }
     | AUTO { $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "auto"); }
     | REGISTER { $$ = createNode(NODE_STORAGE_CLASS_SPECIFIER, "register"); }
     ;
@@ -613,7 +620,7 @@ enumerator:
     IDENTIFIER {
         if ($1 && $1->value) {
             // Enum constants are integers, so size is 4 bytes
-            insertVariable($1->value, "int", 0, NULL, 0, 0);
+            insertVariable($1->value, "int", 0, NULL, 0, 0, 0);  // Enum constants are not static
             // Update the last inserted symbol's kind to enum_constant
             if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
                 strcpy(symtab[symCount - 1].kind, "enum_constant");
@@ -624,7 +631,7 @@ enumerator:
     | IDENTIFIER ASSIGN constant_expression {
         if ($1 && $1->value) {
             // Enum constants are integers, so size is 4 bytes
-            insertVariable($1->value, "int", 0, NULL, 0, 0);
+            insertVariable($1->value, "int", 0, NULL, 0, 0, 0);  // Enum constants are not static
             // Update the last inserted symbol's kind to enum_constant
             if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
                 strcpy(symtab[symCount - 1].kind, "enum_constant");
@@ -663,12 +670,12 @@ init_declarator:
             
             if (in_typedef) {
                 // Insert the symbol and then manually set its kind to "typedef".
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel);
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, 0);  // Typedefs are not static
                 if (symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                     strcpy(symtab[symCount - 1].kind, "typedef");
                 }
             } else {
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel);
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
             }
         }
         $$ = $1;
@@ -687,7 +694,7 @@ init_declarator:
             
             char fullType[256];
             buildFullType(fullType, currentType, ptrLevel);
-            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel);
+            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
             /* emit("ASSIGN", ...) REMOVED */
         }
         
@@ -791,7 +798,7 @@ parameter_declaration:
             buildFullType(fullType, currentType, ptrLevel);
             
             // Insert into symbol table with full type
-            insertVariable(paramName, fullType, 0, NULL, 0, ptrLevel);
+            insertVariable(paramName, fullType, 0, NULL, 0, ptrLevel, 0);  // Parameters are not static
         }
     }
     | declaration_specifiers abstract_declarator {
@@ -838,7 +845,7 @@ labeled_statement:
     IDENTIFIER COLON statement {
         if ($1 && $1->value) {
             /* emit("LABEL", ...) REMOVED */
-            insertSymbol($1->value, "label", 0);
+            insertSymbol($1->value, "label", 0, 0);  // Labels are not static
         }
         $$ = createNode(NODE_LABELED_STATEMENT, "label");
         addChild($$, $1);
