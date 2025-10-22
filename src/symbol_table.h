@@ -72,6 +72,7 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
 void insertParameter(const char* name, const char* type, int ptr_level);  // For function parameters
 void insertFunction(const char* name, const char* ret_type, int param_count, char params[][128], char param_names[][128], int is_static);
 void insertExternalFunction(const char* name, const char* ret_type);  // For library/external functions
+void insertLabel(const char* name);  // For goto labels
 void insertStruct(const char* name, StructMember* members, int member_count);
 void insertUnion(const char* name, StructMember* members, int member_count);
 StructDef* lookupStruct(const char* name);
