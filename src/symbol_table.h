@@ -1,6 +1,8 @@
 #ifndef SYMBOL_TABLE_H
 #define SYMBOL_TABLE_H
 
+#include "ast.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -94,6 +96,39 @@ char* usualArithConv(const char* t1, const char* t2);
 int isAssignable(const char* lhs_type, const char* rhs_type);
 void setCurrentType(const char* type);
 void printSymbolTable();
+
+// ===== ENHANCED TYPE CHECKING FUNCTIONS =====
+
+// Type checking results
+typedef enum {
+    TYPE_OK,
+    TYPE_ERROR,
+    TYPE_WARNING
+} TypeCheckResult;
+
+// Enhanced type checking functions
+TypeCheckResult checkBinaryOp(const char* op, TreeNode* left, TreeNode* right, char** result_type);
+TypeCheckResult checkUnaryOp(const char* op, TreeNode* operand, char** result_type);
+TypeCheckResult checkAssignment(TreeNode* lhs, TreeNode* rhs);
+TypeCheckResult checkFunctionCall(const char* func_name, TreeNode* args, char** result_type);
+TypeCheckResult checkArrayAccess(TreeNode* array, TreeNode* index, char** result_type);
+TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, char** result_type);
+
+// Type compatibility functions
+int isPointerCompatible(const char* ptr1, const char* ptr2);
+int isNullPointer(TreeNode* expr);
+int canImplicitConvert(const char* from_type, const char* to_type);
+char* getCommonType(const char* type1, const char* type2);
+
+// Enhanced validation functions
+int validateBreakContinue(const char* stmt_type);
+int validateReturn(TreeNode* expr, const char* expected_return_type);
+int validateSwitchCase(TreeNode* switch_expr, TreeNode* case_expr);
+int validateGotoLabel(const char* label);
+
+// Type error reporting
+void type_error(int line, const char* msg, ...);
+void type_warning(int line, const char* msg, ...);
 
 #ifdef __cplusplus
 }

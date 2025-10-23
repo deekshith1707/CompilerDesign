@@ -3,8 +3,11 @@
 #include <iomanip>
 #include <cstdio>
 #include <cstring>
+#include <cstdarg>
 
 using namespace std;
+
+extern int yylineno;
 
 Symbol symtab[MAX_SYMBOLS];
 int symCount = 0;
@@ -718,4 +721,385 @@ void printSymbolTable() {
     
     cout << "------------------------------------------------------------------------------------------------" << endl;
     cout << "Total symbols: " << symCount << " | Max scope level: " << max_scope << endl << endl;
+}
+
+// ===== ENHANCED TYPE CHECKING FUNCTIONS =====
+
+// Enhanced binary operator type checking
+TypeCheckResult checkBinaryOp(const char* op, TreeNode* left, TreeNode* right, char** result_type) {
+    if (!left->dataType || !right->dataType) {
+        *result_type = strdup("int"); // fallback
+        return TYPE_ERROR;
+    }
+    
+    const char* ltype = left->dataType;
+    const char* rtype = right->dataType;
+    
+    // Arithmetic operators: +, -, *, /, %
+    if (strcmp(op, "+") == 0) {
+        // Case 1: both arithmetic
+        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+            *result_type = strdup(usualArithConv(ltype, rtype));
+            return TYPE_OK;
+        }
+        // Case 2: pointer + integer
+        if (strstr(ltype, "*") && isArithmeticType(rtype)) {
+            *result_type = strdup(ltype);
+            return TYPE_OK;
+        }
+        // Case 3: integer + pointer
+        if (isArithmeticType(ltype) && strstr(rtype, "*")) {
+            *result_type = strdup(rtype);
+            return TYPE_OK;
+        }
+        type_error(yylineno, "invalid operands to binary '+' (have '%s' and '%s')", ltype, rtype);
+        return TYPE_ERROR;
+    }
+    
+    if (strcmp(op, "-") == 0) {
+        // Case 1: both arithmetic
+        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+            *result_type = strdup(usualArithConv(ltype, rtype));
+            return TYPE_OK;
+        }
+        // Case 2: pointer - integer
+        if (strstr(ltype, "*") && isArithmeticType(rtype)) {
+            *result_type = strdup(ltype);
+            return TYPE_OK;
+        }
+        // Case 3: pointer - pointer (same base type)
+        if (strstr(ltype, "*") && strstr(rtype, "*")) {
+            if (isPointerCompatible(ltype, rtype)) {
+                *result_type = strdup("int"); // ptrdiff_t
+                return TYPE_OK;
+            }
+            type_error(yylineno, "invalid operands to binary '-' (incompatible pointer types)");
+            return TYPE_ERROR;
+        }
+        type_error(yylineno, "invalid operands to binary '-' (have '%s' and '%s')", ltype, rtype);
+        return TYPE_ERROR;
+    }
+    
+    if (strcmp(op, "*") == 0 || strcmp(op, "/") == 0) {
+        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+            *result_type = strdup(usualArithConv(ltype, rtype));
+            return TYPE_OK;
+        }
+        type_error(yylineno, "invalid operands to binary '%s' (have '%s' and '%s')", op, ltype, rtype);
+        return TYPE_ERROR;
+    }
+    
+    if (strcmp(op, "%") == 0) {
+        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+            *result_type = strdup("int");
+            return TYPE_OK;
+        }
+        type_error(yylineno, "invalid operands to binary '%%' (have '%s' and '%s')", ltype, rtype);
+        return TYPE_ERROR;
+    }
+    
+    // Relational operators: <, >, <=, >=
+    if (strcmp(op, "<") == 0 || strcmp(op, ">") == 0 || 
+        strcmp(op, "<=") == 0 || strcmp(op, ">=") == 0) {
+        // Both arithmetic OR both compatible pointers
+        if ((isArithmeticType(ltype) && isArithmeticType(rtype)) ||
+            (strstr(ltype, "*") && strstr(rtype, "*") && isPointerCompatible(ltype, rtype))) {
+            *result_type = strdup("int");
+            return TYPE_OK;
+        }
+        type_error(yylineno, "invalid operands to binary '%s' (have '%s' and '%s')", op, ltype, rtype);
+        return TYPE_ERROR;
+    }
+    
+    // Equality operators: ==, !=
+    if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
+        // Both arithmetic, or both pointers, or pointer vs null
+        if ((isArithmeticType(ltype) && isArithmeticType(rtype)) ||
+            (strstr(ltype, "*") && strstr(rtype, "*")) ||
+            (strstr(ltype, "*") && isNullPointer(right)) ||
+            (isNullPointer(left) && strstr(rtype, "*"))) {
+            *result_type = strdup("int");
+            return TYPE_OK;
+        }
+        type_error(yylineno, "invalid operands to binary '%s' (have '%s' and '%s')", op, ltype, rtype);
+        return TYPE_ERROR;
+    }
+    
+    // Bitwise operators: &, |, ^, <<, >>
+    if (strcmp(op, "&") == 0 || strcmp(op, "|") == 0 || strcmp(op, "^") == 0) {
+        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+            *result_type = strdup("int");
+            return TYPE_OK;
+        }
+        type_error(yylineno, "invalid operands to binary '%s' (have '%s' and '%s')", op, ltype, rtype);
+        return TYPE_ERROR;
+    }
+    
+    if (strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) {
+        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+            *result_type = strdup(ltype); // Result type is left operand type
+            return TYPE_OK;
+        }
+        type_error(yylineno, "invalid operands to binary '%s' (have '%s' and '%s')", op, ltype, rtype);
+        return TYPE_ERROR;
+    }
+    
+    // Logical operators: &&, ||
+    if (strcmp(op, "&&") == 0 || strcmp(op, "||") == 0) {
+        // Any scalar type can be converted to boolean
+        *result_type = strdup("int");
+        return TYPE_OK;
+    }
+    
+    *result_type = strdup("int");
+    return TYPE_ERROR;
+}
+
+// Enhanced unary operator type checking
+TypeCheckResult checkUnaryOp(const char* op, TreeNode* operand, char** result_type) {
+    if (!operand->dataType) {
+        *result_type = strdup("int");
+        return TYPE_ERROR;
+    }
+    
+    const char* optype = operand->dataType;
+    
+    if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0) {
+        if (isArithmeticType(optype)) {
+            *result_type = strdup(optype);
+            return TYPE_OK;
+        }
+        type_error(yylineno, "wrong type argument to unary '%s' (have '%s')", op, optype);
+        return TYPE_ERROR;
+    }
+    
+    if (strcmp(op, "!") == 0) {
+        // Any scalar type can be converted to boolean
+        *result_type = strdup("int");
+        return TYPE_OK;
+    }
+    
+    if (strcmp(op, "~") == 0) {
+        if (isArithmeticType(optype)) {
+            *result_type = strdup("int");
+            return TYPE_OK;
+        }
+        type_error(yylineno, "wrong type argument to unary '~' (have '%s')", optype);
+        return TYPE_ERROR;
+    }
+    
+    if (strcmp(op, "*") == 0) {
+        if (strstr(optype, "*")) {
+            // Remove one level of pointer indirection
+            // Simplified: assume result is int for now
+            *result_type = strdup("int");
+            return TYPE_OK;
+        }
+        type_error(yylineno, "invalid type argument of unary '*' (have '%s')", optype);
+        return TYPE_ERROR;
+    }
+    
+    if (strcmp(op, "&") == 0) {
+        if (!operand->isLValue) {
+            type_error(yylineno, "lvalue required as unary '&' operand");
+            return TYPE_ERROR;
+        }
+        // Create pointer type
+        char* ptr_type = (char*)malloc(strlen(optype) + 3);
+        sprintf(ptr_type, "%s*", optype);
+        *result_type = ptr_type;
+        return TYPE_OK;
+    }
+    
+    if (strcmp(op, "++") == 0 || strcmp(op, "--") == 0) {
+        if (!operand->isLValue) {
+            type_error(yylineno, "lvalue required as %s operand", op);
+            return TYPE_ERROR;
+        }
+        if (isArithmeticType(optype) || strstr(optype, "*")) {
+            *result_type = strdup(optype);
+            return TYPE_OK;
+        }
+        type_error(yylineno, "wrong type argument to %s (have '%s')", op, optype);
+        return TYPE_ERROR;
+    }
+    
+    *result_type = strdup("int");
+    return TYPE_ERROR;
+}
+
+// Enhanced assignment checking
+TypeCheckResult checkAssignment(TreeNode* lhs, TreeNode* rhs) {
+    if (!lhs->isLValue) {
+        type_error(yylineno, "lvalue required as left operand of assignment");
+        return TYPE_ERROR;
+    }
+    
+    if (!lhs->dataType || !rhs->dataType) {
+        return TYPE_ERROR;
+    }
+    
+    const char* ltype = lhs->dataType;
+    const char* rtype = rhs->dataType;
+    
+    // Same type
+    if (strcmp(ltype, rtype) == 0) {
+        return TYPE_OK;
+    }
+    
+    // Arithmetic conversion
+    if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+        if (strcmp(ltype, "char") == 0 && strcmp(rtype, "int") == 0) {
+            type_warning(yylineno, "conversion from 'int' to 'char' may alter value");
+        }
+        return TYPE_OK;
+    }
+    
+    // Pointer assignments
+    if (strstr(ltype, "*") && strstr(rtype, "*")) {
+        if (isPointerCompatible(ltype, rtype)) {
+            return TYPE_OK;
+        }
+        type_warning(yylineno, "assignment from incompatible pointer type");
+        return TYPE_WARNING;
+    }
+    
+    // Pointer = NULL
+    if (strstr(ltype, "*") && isNullPointer(rhs)) {
+        return TYPE_OK;
+    }
+    
+    // Pointer = integer (error unless 0)
+    if (strstr(ltype, "*") && isArithmeticType(rtype)) {
+        type_error(yylineno, "assignment makes pointer from integer without a cast");
+        return TYPE_ERROR;
+    }
+    
+    // Integer = pointer (error)
+    if (isArithmeticType(ltype) && strstr(rtype, "*")) {
+        type_error(yylineno, "assignment makes integer from pointer without a cast");
+        return TYPE_ERROR;
+    }
+    
+    type_error(yylineno, "incompatible types when assigning to type '%s' from type '%s'", ltype, rtype);
+    return TYPE_ERROR;
+}
+
+// Function call validation
+TypeCheckResult checkFunctionCall(const char* func_name, TreeNode* args, char** result_type) {
+    Symbol* func_sym = lookupSymbol(func_name);
+    
+    if (!func_sym) {
+        type_error(yylineno, "implicit declaration of function '%s'", func_name);
+        *result_type = strdup("int");
+        return TYPE_ERROR;
+    }
+    
+    if (!func_sym->is_function) {
+        type_error(yylineno, "called object '%s' is not a function", func_name);
+        return TYPE_ERROR;
+    }
+    
+    *result_type = strdup(func_sym->return_type);
+    
+    // Check argument count for non-external functions
+    if (!func_sym->is_external) {
+        int provided_args = args ? args->childCount : 0;
+        if (provided_args != func_sym->param_count) {
+            type_error(yylineno, "too %s arguments to function '%s' (expected %d, got %d)",
+                      provided_args < func_sym->param_count ? "few" : "many",
+                      func_name, func_sym->param_count, provided_args);
+            return TYPE_ERROR;
+        }
+        
+        // Check argument types
+        if (args) {
+            for (int i = 0; i < args->childCount && i < func_sym->param_count; i++) {
+                if (args->children[i]->dataType) {
+                    if (!canImplicitConvert(args->children[i]->dataType, func_sym->param_types[i])) {
+                        type_error(yylineno, "incompatible type for argument %d of '%s'", i+1, func_name);
+                        return TYPE_ERROR;
+                    }
+                }
+            }
+        }
+    }
+    
+    return TYPE_OK;
+}
+
+// Array access validation
+TypeCheckResult checkArrayAccess(TreeNode* array, TreeNode* index, char** result_type) {
+    if (!array->dataType || !index->dataType) {
+        *result_type = strdup("int");
+        return TYPE_ERROR;
+    }
+    
+    // Index must be integer type
+    if (!isArithmeticType(index->dataType)) {
+        type_error(yylineno, "array subscript is not an integer");
+        return TYPE_ERROR;
+    }
+    
+    // Array must be array or pointer type
+    const char* array_type = array->dataType;
+    if (strstr(array_type, "[") || strstr(array_type, "*")) {
+        // Simplified: assume element type is int
+        *result_type = strdup("int");
+        return TYPE_OK;
+    }
+    
+    type_error(yylineno, "subscripted value is not an array or pointer");
+    return TYPE_ERROR;
+}
+
+// Helper functions
+int isPointerCompatible(const char* ptr1, const char* ptr2) {
+    // Simplified: void* is compatible with any pointer
+    if (strstr(ptr1, "void*") || strstr(ptr2, "void*")) {
+        return 1;
+    }
+    // Otherwise, base types must match
+    return strcmp(ptr1, ptr2) == 0;
+}
+
+int isNullPointer(TreeNode* expr) {
+    if (expr->type == NODE_INTEGER_CONSTANT && strcmp(expr->value, "0") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+int canImplicitConvert(const char* from_type, const char* to_type) {
+    if (strcmp(from_type, to_type) == 0) return 1;
+    if (isArithmeticType(from_type) && isArithmeticType(to_type)) return 1;
+    if (strstr(from_type, "*") && strstr(to_type, "*")) return isPointerCompatible(from_type, to_type);
+    return 0;
+}
+
+char* getCommonType(const char* type1, const char* type2) {
+    if (strcmp(type1, type2) == 0) return strdup(type1);
+    if (isArithmeticType(type1) && isArithmeticType(type2)) {
+        return strdup(usualArithConv(type1, type2));
+    }
+    return strdup("int"); // fallback
+}
+
+// Error reporting
+void type_error(int line, const char* msg, ...) {
+    va_list args;
+    va_start(args, msg);
+    fprintf(stderr, "Type Error on line %d: ", line);
+    vfprintf(stderr, msg, args);
+    fprintf(stderr, "\n");
+    va_end(args);
+}
+
+void type_warning(int line, const char* msg, ...) {
+    va_list args;
+    va_start(args, msg);
+    fprintf(stderr, "Type Warning on line %d: ", line);
+    vfprintf(stderr, msg, args);
+    fprintf(stderr, "\n");
+    va_end(args);
 }

@@ -1127,27 +1127,14 @@ assignment_expression:
         $$ = $1;
     }
     | unary_expression ASSIGN assignment_expression {
-        /* 1. Semantic Checks */
-        if (!isLValue($1)) {
-            semantic_error("lvalue required as left operand of assignment");
-        }
+        // Enhanced assignment type checking
+        TypeCheckResult result = checkAssignment($1, $3);
         
-        if ($1->dataType && $3->dataType && !isAssignable($1->dataType, $3->dataType)) {
-            char err_msg[256];
-            sprintf(err_msg, "incompatible types when assigning to type '%s' from type '%s'",
-                    $1->dataType, $3->dataType);
-            semantic_error(err_msg);
-        }
-        
-        /* 2. Build Node */
         $$ = createNode(NODE_ASSIGNMENT_EXPRESSION, "=");
         addChild($$, $1);
         addChild($$, $3);
 
-        /* 3. Store Type */
         $$->dataType = $1->dataType ? strdup($1->dataType) : NULL;
-        
-        /* All emit, convertType, and tacResult logic REMOVED */
     }
     | unary_expression PLUS_ASSIGN assignment_expression {
         if (!isLValue($1)) {
@@ -1410,40 +1397,30 @@ additive_expression:
         $$ = $1;
     }
     | additive_expression PLUS multiplicative_expression {
-        if ($1->dataType && $3->dataType &&
-            !isArithmeticType($1->dataType) && !isArithmeticType($3->dataType)) {
-            yyerror("Addition requires arithmetic types");
-        }
-        
         char* result_type = NULL;
-        if ($1->dataType && $3->dataType) {
-            result_type = usualArithConv($1->dataType, $3->dataType);
-        }
+        TypeCheckResult result = checkBinaryOp("+", $1, $3, &result_type);
         
-        /* All convertType, newTemp, emit, tacResult logic REMOVED */
+        if (result == TYPE_ERROR) {
+            // Error already reported by checkBinaryOp
+        }
         
         $$ = createNode(NODE_ADDITIVE_EXPRESSION, "+");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = result_type ? strdup(result_type) : strdup("int");
+        $$->dataType = result_type;
     }
     | additive_expression MINUS multiplicative_expression {
-        if ($1->dataType && $3->dataType &&
-            !isArithmeticType($1->dataType) && !isArithmeticType($3->dataType)) {
-            yyerror("Subtraction requires arithmetic types");
-        }
-        
         char* result_type = NULL;
-        if ($1->dataType && $3->dataType) {
-            result_type = usualArithConv($1->dataType, $3->dataType);
-        }
+        TypeCheckResult result = checkBinaryOp("-", $1, $3, &result_type);
         
-        /* All convertType, newTemp, emit, tacResult logic REMOVED */
+        if (result == TYPE_ERROR) {
+            // Error already reported by checkBinaryOp
+        }
 
         $$ = createNode(NODE_ADDITIVE_EXPRESSION, "-");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = result_type ? strdup(result_type) : strdup("int");
+        $$->dataType = result_type;
     }
     ;
 
@@ -1452,53 +1429,31 @@ multiplicative_expression:
         $$ = $1;
     }
     | multiplicative_expression MULTIPLY cast_expression {
-        if ($1->dataType && $3->dataType &&
-            !isArithmeticType($1->dataType) && !isArithmeticType($3->dataType)) {
-            yyerror("Multiplication requires arithmetic types");
-        }
-        
         char* result_type = NULL;
-        if ($1->dataType && $3->dataType) {
-            result_type = usualArithConv($1->dataType, $3->dataType);
-        }
+        TypeCheckResult result = checkBinaryOp("*", $1, $3, &result_type);
         
-        /* All convertType, newTemp, emit, tacResult logic REMOVED */
-
         $$ = createNode(NODE_MULTIPLICATIVE_EXPRESSION, "*");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = result_type ? strdup(result_type) : strdup("int");
+        $$->dataType = result_type;
     }
     | multiplicative_expression DIVIDE cast_expression {
-        if ($1->dataType && $3->dataType &&
-            !isArithmeticType($1->dataType) && !isArithmeticType($3->dataType)) {
-            yyerror("Division requires arithmetic types");
-        }
-        
         char* result_type = NULL;
-        if ($1->dataType && $3->dataType) {
-            result_type = usualArithConv($1->dataType, $3->dataType);
-        }
-        
-        /* All convertType, newTemp, emit, tacResult logic REMOVED */
+        TypeCheckResult result = checkBinaryOp("/", $1, $3, &result_type);
         
         $$ = createNode(NODE_MULTIPLICATIVE_EXPRESSION, "/");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = result_type ? strdup(result_type) : strdup("int");
+        $$->dataType = result_type;
     }
     | multiplicative_expression MODULO cast_expression {
-        if ($1->dataType && $3->dataType &&
-            !isArithmeticType($1->dataType) && !isArithmeticType($3->dataType)) {
-            yyerror("Modulo requires arithmetic types");
-        }
-        
-        /* All newTemp, emit, tacResult logic REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp("%", $1, $3, &result_type);
         
         $$ = createNode(NODE_MULTIPLICATIVE_EXPRESSION, "%");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
+        $$->dataType = result_type;
     }
     ;
 
@@ -1551,27 +1506,21 @@ unary_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | BITWISE_AND cast_expression {
-        if (!isLValue($2)) {
-            semantic_error("lvalue required as unary '&' operand");
-        }
-        /* newTemp(), emit("ADDR") REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkUnaryOp("&", $2, &result_type);
+        
         $$ = createNode(NODE_UNARY_EXPRESSION, "&");
         addChild($$, $2);
-        // TODO: A better type system would create "pointer to $2->dataType"
-        $$->dataType = strdup("int*");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     | MULTIPLY cast_expression {
-        if ($2->dataType && !isPointerType($2->dataType)) {
-            semantic_error("invalid type argument of unary '*' (have non-pointer type)");
-        }
-        /* newTemp(), emit("DEREF") REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkUnaryOp("*", $2, &result_type);
+        
         $$ = createNode(NODE_UNARY_EXPRESSION, "*");
         addChild($$, $2);
-        // TODO: A better type system would find "base type of $2->dataType"
-        $$->dataType = strdup("int");
+        $$->dataType = result_type;
         $$->isLValue = 1;
-        /* $$->tacResult = ... REMOVED */
     }
     | PLUS cast_expression {
         $$ = $2;
@@ -1618,13 +1567,15 @@ postfix_expression:
         $$ = $1;
     }
     | postfix_expression LBRACKET expression RBRACKET {
-        /* newTemp(), emit("ARRAY_ACCESS") REMOVED */
+        // Enhanced array access type checking
+        char* result_type = NULL;
+        TypeCheckResult result = checkArrayAccess($1, $3, &result_type);
+        
         $$ = createNode(NODE_POSTFIX_EXPRESSION, "[]");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = $1->dataType ? strdup($1->dataType) : NULL; // Simplistic
+        $$->dataType = result_type;
         $$->isLValue = 1;
-        /* $$->tacResult = ... REMOVED */
     }
     | postfix_expression LPAREN RPAREN {
         /* == Check for undeclared function and implicitly declare it == */
@@ -1645,23 +1596,14 @@ postfix_expression:
         /* $$->tacResult = ... REMOVED */
     }
     | postfix_expression LPAREN argument_expression_list RPAREN {
-        /* == Check for undeclared function and implicitly declare it == */
-        Symbol* sym = lookupSymbol($1->value);
-        if (!sym) {
-            insertExternalFunction($1->value, "int");
-        } else if (!sym->is_function) {
-            char err_msg[256];
-            sprintf(err_msg, "Called object '%s' is not a function", $1->value);
-            yyerror(err_msg);
-        }
-        
-        /* newTemp(), emit("CALL") REMOVED */
+        // Enhanced function call type checking
+        char* result_type = NULL;
+        TypeCheckResult result = checkFunctionCall($1->value, $3, &result_type);
         
         $$ = createNode(NODE_POSTFIX_EXPRESSION, "()");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int"); // Should be sym->return_type
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     | postfix_expression DOT IDENTIFIER {
         /* newTemp(), emit("MEMBER_ACCESS") REMOVED */
