@@ -286,7 +286,7 @@ int isFunctionDeclarator(TreeNode* node) {
 %token <node> STRING_LITERAL CHAR_CONSTANT
 %token <node> PREPROCESSOR
 %token <node> IF ELSE WHILE FOR DO SWITCH CASE DEFAULT BREAK CONTINUE RETURN
-%token <node> INT CHAR_TOKEN FLOAT_TOKEN DOUBLE LONG SHORT UNSIGNED SIGNED VOID
+%token <node> INT CHAR_TOKEN FLOAT_TOKEN DOUBLE LONG SHORT UNSIGNED SIGNED VOID BOOL
 %token <node> STRUCT ENUM UNION TYPEDEF STATIC EXTERN AUTO REGISTER
 %token <node> CONST VOLATILE GOTO UNTIL SIZEOF
 %token <node> ASSIGN PLUS_ASSIGN MINUS_ASSIGN MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN
@@ -387,7 +387,30 @@ external_declaration:
     ;
 
 preprocessor_directive:
-    PREPROCESSOR { $$ = NULL; }
+    PREPROCESSOR { 
+        // Check if this is #include <stdio.h> and insert standard library functions
+        if ($1 && $1->value && strstr($1->value, "stdio.h")) {
+            // Insert common stdio.h functions
+            insertExternalFunction("printf", "int");
+            insertExternalFunction("scanf", "int");
+            insertExternalFunction("fprintf", "int");
+            insertExternalFunction("fscanf", "int");
+            insertExternalFunction("sprintf", "int");
+            insertExternalFunction("sscanf", "int");
+            insertExternalFunction("fopen", "FILE*");
+            insertExternalFunction("fclose", "int");
+            insertExternalFunction("fread", "size_t");
+            insertExternalFunction("fwrite", "size_t");
+            insertExternalFunction("fgetc", "int");
+            insertExternalFunction("fputc", "int");
+            insertExternalFunction("fputs", "int");
+            insertExternalFunction("fgets", "char*");
+            insertExternalFunction("puts", "int");
+            insertExternalFunction("getchar", "int");
+            insertExternalFunction("putchar", "int");
+        }
+        $$ = NULL; 
+    }
     ;
 
 function_definition:
@@ -538,6 +561,10 @@ type_specifier:
     | UNSIGNED {
         setCurrentType("unsigned");
         $$ = createNode(NODE_TYPE_SPECIFIER, "unsigned");
+    }
+    | BOOL {
+        setCurrentType("bool");
+        $$ = createNode(NODE_TYPE_SPECIFIER, "bool");
     }
     | struct_or_union_specifier { $$ = $1; }
     | enum_specifier { $$ = $1; }

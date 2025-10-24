@@ -8,6 +8,7 @@
 using namespace std;
 
 extern int yylineno;
+extern int error_count;
 
 Symbol symtab[MAX_SYMBOLS];
 int symCount = 0;
@@ -556,7 +557,7 @@ const char* getDisplayType(const Symbol* sym) {
 }
 
 void printSymbolTable() {
-    cout << "\n=== SYMBOL TABLE (Hierarchical Scope View) ===" << endl;
+    cout << "\n=== SYMBOL TABLE (User-Defined Symbols Only) ===" << endl;
     cout << left << setw(20) << "Name"
          << "  " << setw(20) << "Type"
          << "  " << setw(20) << "Kind"
@@ -565,34 +566,38 @@ void printSymbolTable() {
          << "  " << right << setw(5) << "Size" << endl;
     cout << "------------------------------------------------------------------------------------------------" << endl;
     
-    // Print global scope (0)
-    cout << ">>> GLOBAL SCOPE (0) <<<" << endl;
+    // Count user-defined symbols in global scope
+    int global_user_symbols = 0;
     for (int i = 0; i < symCount; i++) {
-        if (symtab[i].scope_level == 0) {
-            const char* display_type;
-            if (symtab[i].is_function) {
-                display_type = symtab[i].return_type;
-            } else {
-                display_type = getDisplayType(&symtab[i]);
-            }
-            
-            cout << left << setw(20) << symtab[i].name
-                 << "  " << setw(20) << display_type
-                 << "  " << setw(20) << symtab[i].kind
-                 << "  " << right << setw(5) << symtab[i].scope_level;
-            
-            // Show "external" for library functions, "none" for user-defined
-            if (symtab[i].is_external) {
-                cout << "  " << left << setw(10) << "external";
-            } else {
-                cout << "  " << left << setw(10) << "none";
-            }
-            
-            // Show "-" for labels, actual size for others
-            if (strcmp(symtab[i].kind, "label") == 0) {
-                cout << "  " << right << setw(5) << "-" << endl;
-            } else {
-                cout << "  " << right << setw(5) << symtab[i].size << endl;
+        if (symtab[i].scope_level == 0 && !symtab[i].is_external) {
+            global_user_symbols++;
+        }
+    }
+    
+    // Print global scope (0) - only user-defined symbols
+    if (global_user_symbols > 0) {
+        cout << ">>> GLOBAL SCOPE (0) <<<" << endl;
+        for (int i = 0; i < symCount; i++) {
+            if (symtab[i].scope_level == 0 && !symtab[i].is_external) {
+                const char* display_type;
+                if (symtab[i].is_function) {
+                    display_type = symtab[i].return_type;
+                } else {
+                    display_type = getDisplayType(&symtab[i]);
+                }
+                
+                cout << left << setw(20) << symtab[i].name
+                     << "  " << setw(20) << display_type
+                     << "  " << setw(20) << symtab[i].kind
+                     << "  " << right << setw(5) << symtab[i].scope_level
+                     << "  " << left << setw(10) << "none";
+                
+                // Show "-" for labels, actual size for others
+                if (strcmp(symtab[i].kind, "label") == 0) {
+                    cout << "  " << right << setw(5) << "-" << endl;
+                } else {
+                    cout << "  " << right << setw(5) << symtab[i].size << endl;
+                }
             }
         }
     }
@@ -711,6 +716,14 @@ void printSymbolTable() {
         }
     }
     
+    // Count user-defined symbols
+    int user_symbol_count = 0;
+    for (int i = 0; i < symCount; i++) {
+        if (!symtab[i].is_external) {
+            user_symbol_count++;
+        }
+    }
+    
     // Find max scope level
     int max_scope = 0;
     for (int i = 0; i < symCount; i++) {
@@ -720,7 +733,8 @@ void printSymbolTable() {
     }
     
     cout << "------------------------------------------------------------------------------------------------" << endl;
-    cout << "Total symbols: " << symCount << " | Max scope level: " << max_scope << endl << endl;
+    cout << "User-defined symbols: " << user_symbol_count << " | Max scope level: " << max_scope << endl;
+    cout << "External functions available: " << (symCount - user_symbol_count) << " (stdio.h)" << endl << endl;
 }
 
 // ===== ENHANCED TYPE CHECKING FUNCTIONS =====
@@ -1093,6 +1107,7 @@ void type_error(int line, const char* msg, ...) {
     vfprintf(stderr, msg, args);
     fprintf(stderr, "\n");
     va_end(args);
+    error_count++;  // Increment error count to prevent IR generation
 }
 
 void type_warning(int line, const char* msg, ...) {

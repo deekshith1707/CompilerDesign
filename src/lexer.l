@@ -99,6 +99,9 @@ PREPROCESSOR    ^[ \t]*#[ \t]*[a-zA-Z]+
 "unsigned"      { update_position(); return UNSIGNED; }
 "signed"        { update_position(); return SIGNED; }
 "void"          { update_position(); return VOID; }
+"bool"          { update_position(); return BOOL; }
+"true"          { update_position(); yylval.node = createNode(NODE_CONSTANT, "1"); return INTEGER_CONSTANT; }
+"false"         { update_position(); yylval.node = createNode(NODE_CONSTANT, "0"); return INTEGER_CONSTANT; }
 "struct"        { update_position(); return STRUCT; }
 "enum"          { update_position(); return ENUM; }
 "union"         { update_position(); return UNION; }
@@ -113,9 +116,9 @@ PREPROCESSOR    ^[ \t]*#[ \t]*[a-zA-Z]+
 "until"         { update_position(); return UNTIL; }
 "sizeof"        { update_position(); return SIZEOF; }
 
-{INCLUDE_HEADER}  { update_position(); return PREPROCESSOR; }
-{INCLUDE_FILE}    { update_position(); return PREPROCESSOR; }
-{PREPROCESSOR}    { update_position(); return PREPROCESSOR; }
+{INCLUDE_HEADER}  { update_position(); yylval.node = createNode(NODE_PREPROCESSOR, yytext); return PREPROCESSOR; }
+{INCLUDE_FILE}    { update_position(); yylval.node = createNode(NODE_PREPROCESSOR, yytext); return PREPROCESSOR; }
+{PREPROCESSOR}    { update_position(); yylval.node = createNode(NODE_PREPROCESSOR, yytext); return PREPROCESSOR; }
 
 {IDENTIFIER}    {
     update_position();
