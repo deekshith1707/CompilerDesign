@@ -16,6 +16,21 @@ struct CaseLabel {
     char* label;
 };
 
+// Helper function to emit appropriate conditional jump based on data type
+static void emitConditionalJump(const char* op, const char* operand, const char* label, const char* dataType) {
+    if (dataType && strcmp(dataType, "float") == 0) {
+        if (strcmp(op, "IF_FALSE_GOTO") == 0) {
+            emit("IF_FALSE_GOTO_FLOAT", operand, label, "");
+        } else if (strcmp(op, "IF_TRUE_GOTO") == 0) {
+            emit("IF_TRUE_GOTO_FLOAT", operand, label, "");
+        } else {
+            emit(op, operand, label, "");
+        }
+    } else {
+        emit(op, operand, label, "");
+    }
+}
+
 // Control flow stacks
 #define MAX_LOOP_DEPTH 100
 static LoopContext loopStack[MAX_LOOP_DEPTH];
@@ -207,9 +222,27 @@ char* generate_ir(TreeNode* node) {
 
         case NODE_DECLARATION:
         {
-            // Process initializers if any
+            // Process all children, handling multiple declarators properly
             for (int i = 0; i < node->childCount; i++) {
-                generate_ir(node->children[i]);
+                TreeNode* child = node->children[i];
+                
+                // Skip declaration_specifiers (type info), process init_declarator_list
+                if (child && i > 0) {  // Skip first child which is usually declaration_specifiers
+                    // Check if this is an init_declarator_list or single init_declarator
+                    if (child->childCount > 0) {
+                        // Process all declarators in the list
+                        for (int j = 0; j < child->childCount; j++) {
+                            TreeNode* declarator = child->children[j];
+                            if (declarator && declarator->type == NODE_INITIALIZER) {
+                                generate_ir(declarator);
+                            }
+                        }
+                    }
+                    // Also process the main child if it's an initializer
+                    if (child->type == NODE_INITIALIZER) {
+                        generate_ir(child);
+                    }
+                }
             }
             return NULL;
         }
@@ -239,7 +272,10 @@ char* generate_ir(TreeNode* node) {
                 
                 char* else_label = newLabel();
                 if (cond_result) {
-                    emit("IF_FALSE_GOTO", cond_result, else_label, "");
+                    // Use appropriate comparison based on condition data type
+                    const char* dataType = (node->children[0] && node->children[0]->dataType) ? 
+                                          node->children[0]->dataType : "int";
+                    emitConditionalJump("IF_FALSE_GOTO", cond_result, else_label, dataType);
                 }
                 
                 // Then block
@@ -256,7 +292,10 @@ char* generate_ir(TreeNode* node) {
                 char* end_label = newLabel();
                 
                 if (cond_result) {
-                    emit("IF_FALSE_GOTO", cond_result, else_label, "");
+                    // Use appropriate comparison based on condition data type
+                    const char* dataType = (node->children[0] && node->children[0]->dataType) ? 
+                                          node->children[0]->dataType : "int";
+                    emitConditionalJump("IF_FALSE_GOTO", cond_result, else_label, dataType);
                 }
                 
                 // Then block
@@ -671,6 +710,7 @@ char* generate_ir(TreeNode* node) {
 
         case NODE_LOGICAL_OR_EXPRESSION:
         {
+            // Implement proper short-circuit evaluation
             char* result_temp = newTemp();
             char* true_label = newLabel();
             char* end_label = newLabel();
@@ -678,14 +718,18 @@ char* generate_ir(TreeNode* node) {
             // 1. Evaluate left side
             char* left = generate_ir(node->children[0]);
             
-            // 2. Short-circuit if true
-            emit("IF_TRUE_GOTO", left, true_label, "");
+            // 2. Short-circuit: if left is true, set result to 1 and skip right
+            const char* leftType = (node->children[0] && node->children[0]->dataType) ? 
+                                  node->children[0]->dataType : "int";
+            emitConditionalJump("IF_TRUE_GOTO", left, true_label, leftType);
             
             // 3. Left was false, evaluate right side
             char* right = generate_ir(node->children[1]);
             
-            // 4. Branch if right side is true
-            emit("IF_TRUE_GOTO", right, true_label, "");
+            // 4. Set result based on right side
+            const char* rightType = (node->children[1] && node->children[1]->dataType) ? 
+                                   node->children[1]->dataType : "int";
+            emitConditionalJump("IF_TRUE_GOTO", right, true_label, rightType);
             
             // 5. Both were false: assign 0
             emit("ASSIGN", "0", "", result_temp);
@@ -703,6 +747,7 @@ char* generate_ir(TreeNode* node) {
 
         case NODE_LOGICAL_AND_EXPRESSION:
         {
+            // Implement proper short-circuit evaluation  
             char* result_temp = newTemp();
             char* false_label = newLabel();
             char* end_label = newLabel();
@@ -710,14 +755,18 @@ char* generate_ir(TreeNode* node) {
             // 1. Evaluate left side
             char* left = generate_ir(node->children[0]);
             
-            // 2. Short-circuit if false
-            emit("IF_FALSE_GOTO", left, false_label, "");
+            // 2. Short-circuit: if left is false, set result to 0 and skip right
+            const char* leftType = (node->children[0] && node->children[0]->dataType) ? 
+                                  node->children[0]->dataType : "int";
+            emitConditionalJump("IF_FALSE_GOTO", left, false_label, leftType);
             
             // 3. Left was true, evaluate right side
             char* right = generate_ir(node->children[1]);
             
-            // 4. Branch if right side is false
-            emit("IF_FALSE_GOTO", right, false_label, "");
+            // 4. Set result based on right side
+            const char* rightType = (node->children[1] && node->children[1]->dataType) ? 
+                                   node->children[1]->dataType : "int";
+            emitConditionalJump("IF_FALSE_GOTO", right, false_label, rightType);
             
             // 5. Both were true: assign 1
             emit("ASSIGN", "1", "", result_temp);

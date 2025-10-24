@@ -120,6 +120,12 @@ string convertToThreeAddress(const Quadruple& quad) {
     else if (op == "IF_FALSE_GOTO") {
         return "if " + arg1 + " == 0 goto " + arg2;
     }
+    else if (op == "IF_FALSE_GOTO_FLOAT") {
+        return "if " + arg1 + " == 0.0 goto " + arg2;
+    }
+    else if (op == "IF_TRUE_GOTO_FLOAT") {
+        return "if " + arg1 + " != 0.0 goto " + arg2;
+    }
     
     // Indexed assignment: x = y[i], x[i] = y
     else if (op == "ARRAY_ACCESS") {
