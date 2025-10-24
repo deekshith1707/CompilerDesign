@@ -19,6 +19,9 @@ int current_offset = 0;
 char currentType[128] = "int";
 char current_function[128] = "";  // Track which function we're currently in
 int next_scope = 1;               // Always use 1 for function scopes (not sequential)
+int current_block_id = 0;         // Current nested block ID
+int next_block_id = 1;            // Counter for unique block IDs
+int parent_blocks[100];           // Stack of parent block IDs
 
 // Struct definition table
 StructDef structTable[MAX_STRUCTS];
@@ -162,10 +165,12 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
         return;
     }
     
-    // Check for duplicate in current scope
+    // Check for duplicate in current scope AND current block
     for (int i = symCount - 1; i >= 0; i--) {
-        if (strcmp(symtab[i].name, name) == 0 && symtab[i].scope_level == current_scope) {
-            return; // Already exists
+        if (strcmp(symtab[i].name, name) == 0 && 
+            symtab[i].scope_level == current_scope &&
+            symtab[i].block_id == current_block_id) {
+            return; // Already exists in this specific block
         }
     }
     
@@ -219,6 +224,7 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
     
     symtab[symCount].scope_level = current_scope;
     symtab[symCount].parent_scope = (scope_depth > 0) ? parent_scopes[scope_depth - 1] : -1;
+    symtab[symCount].block_id = (current_scope >= 2) ? current_block_id : 0;  // Only nested blocks get block IDs
     symtab[symCount].offset = current_offset;
     symtab[symCount].is_array = is_array;
     symtab[symCount].ptr_level = ptr_level;
@@ -282,6 +288,7 @@ void insertParameter(const char* name, const char* type, int ptr_level) {
     strcpy(symtab[symCount].kind, "parameter");  // Mark as parameter, not variable
     symtab[symCount].scope_level = current_scope;
     symtab[symCount].parent_scope = (scope_depth > 0) ? parent_scopes[scope_depth - 1] : -1;
+    symtab[symCount].block_id = 0;  // Parameters are at function scope, no block ID
     symtab[symCount].offset = current_offset;
     symtab[symCount].is_array = 0;
     symtab[symCount].ptr_level = ptr_level;
@@ -314,6 +321,7 @@ void insertFunction(const char* name, const char* ret_type, int param_count, cha
     }
     symtab[symCount].scope_level = 0;  // Functions are always at global scope
     symtab[symCount].parent_scope = -1; // No parent for global scope
+    symtab[symCount].block_id = 0;  // Functions don't have block IDs
     symtab[symCount].is_function = 1;
     symtab[symCount].param_count = param_count;
     strcpy(symtab[symCount].function_scope, "");  // Functions are in global scope
@@ -354,6 +362,7 @@ void insertExternalFunction(const char* name, const char* ret_type) {
     strcpy(symtab[symCount].kind, "function (external)");  // Mark as external in kind
     symtab[symCount].scope_level = 0;  // Functions are always at global scope
     symtab[symCount].parent_scope = -1; // No parent for global scope
+    symtab[symCount].block_id = 0;  // Functions don't have block IDs
     symtab[symCount].is_function = 1;
     symtab[symCount].param_count = 0;  // Don't know params for external functions
     strcpy(symtab[symCount].function_scope, "");  // Functions are in global scope
@@ -375,6 +384,7 @@ void insertLabel(const char* name) {
     strcpy(symtab[symCount].kind, "label");
     symtab[symCount].scope_level = current_scope;
     symtab[symCount].parent_scope = (scope_depth > 0) ? parent_scopes[scope_depth - 1] : -1;
+    symtab[symCount].block_id = (current_scope >= 2) ? current_block_id : 0;
     symtab[symCount].is_function = 0;
     symtab[symCount].is_array = 0;
     symtab[symCount].ptr_level = 0;
@@ -393,9 +403,20 @@ Symbol* lookupSymbol(const char* name) {
         if (strcmp(symtab[i].name, name) == 0) {
             // Check if this symbol is in current scope or any parent scope
             int check_scope = current_scope;
+            
             while (check_scope >= 0) {
                 if (symtab[i].scope_level == check_scope) {
-                    return &symtab[i];
+                    // Found symbol at the scope level we're checking
+                    if (check_scope == current_scope) {
+                        // Current scope: must be in same block or be a function-level symbol (block_id 0)
+                        if (symtab[i].block_id == current_block_id || symtab[i].block_id == 0) {
+                            return &symtab[i];
+                        }
+                        // Symbol in different block at current scope - not visible, continue searching parent scopes
+                    } else {
+                        // Parent scope (check_scope < current_scope): symbol is visible regardless of block_id
+                        return &symtab[i];
+                    }
                 }
                 // Move to parent scope
                 if (check_scope == 0) break;
@@ -439,23 +460,28 @@ void exitFunctionScope() {
 }
 
 void enterScope() {
-    // Push current scope onto parent stack
+    // Push current scope and block onto parent stacks
     if (scope_depth < 100) {
         parent_scopes[scope_depth] = current_scope;
+        parent_blocks[scope_depth] = current_block_id;
         scope_depth++;
     }
     // Increment scope level for nested blocks
     current_scope++;
+    // Assign unique block ID for this nested block
+    current_block_id = next_block_id++;
 }
 
 void exitScope() {
     // Don't remove symbols - keep them for symbol table display
-    // Restore the parent scope level
+    // Restore the parent scope level and block ID
     if (scope_depth > 0) {
         scope_depth--;
         current_scope = parent_scopes[scope_depth];
+        current_block_id = parent_blocks[scope_depth];
     } else {
         current_scope = 0;
+        current_block_id = 0;
     }
 }
 
@@ -674,60 +700,59 @@ void printSymbolTable() {
     
     // Print all nested block scopes (2 and above) dynamically
     for (int scope_level = 2; scope_level <= max_scope; scope_level++) {
-        bool has_this_scope = false;
-        for (int i = 0; i < symCount; i++) {
-            if (symtab[i].scope_level == scope_level) {
-                has_this_scope = true;
-                break;
-            }
-        }
+        // Group by function name and block ID
+        struct BlockInfo {
+            char func_name[128];
+            int block_id;
+        };
+        BlockInfo processed_blocks[100];
+        int processed_count = 0;
         
-        if (has_this_scope) {
-            // Group by function name
-            char processed_functions[100][128];
-            int processed_count = 0;
-            
-            for (int i = 0; i < symCount; i++) {
-                if (symtab[i].scope_level == scope_level && strlen(symtab[i].function_scope) > 0) {
-                    const char* func_name = symtab[i].function_scope;
-                    
-                    // Check if we've already processed this function
-                    bool already_processed = false;
-                    for (int j = 0; j < processed_count; j++) {
-                        if (strcmp(processed_functions[j], func_name) == 0) {
-                            already_processed = true;
-                            break;
-                        }
+        for (int i = 0; i < symCount; i++) {
+            if (symtab[i].scope_level == scope_level && strlen(symtab[i].function_scope) > 0) {
+                const char* func_name = symtab[i].function_scope;
+                int block_id = symtab[i].block_id;
+                
+                // Check if we've already processed this function+block combination
+                bool already_processed = false;
+                for (int j = 0; j < processed_count; j++) {
+                    if (strcmp(processed_blocks[j].func_name, func_name) == 0 && 
+                        processed_blocks[j].block_id == block_id) {
+                        already_processed = true;
+                        break;
                     }
+                }
+                
+                if (!already_processed) {
+                    // Add to processed list
+                    strcpy(processed_blocks[processed_count].func_name, func_name);
+                    processed_blocks[processed_count].block_id = block_id;
+                    processed_count++;
                     
-                    if (!already_processed) {
-                        // Add to processed list
-                        strcpy(processed_functions[processed_count], func_name);
-                        processed_count++;
-                        
-                        // Print header for this scope level
-                        cout << ">>> SCOPE LEVEL " << scope_level << " (" << func_name << " - nested) <<<" << endl;
-                        
-                        // Print all symbols in this scope
-                        for (int j = 0; j < symCount; j++) {
-                            if (symtab[j].scope_level == scope_level && strcmp(symtab[j].function_scope, func_name) == 0) {
-                                // Indent based on scope level
-                                for (int indent = 0; indent < scope_level; indent++) {
-                                    cout << "  ";
-                                }
-                                
-                                cout << left << setw(18) << symtab[j].name
-                                     << "  " << setw(20) << getDisplayType(&symtab[j])
-                                     << "  " << setw(20) << symtab[j].kind
-                                     << "  " << right << setw(5) << symtab[j].scope_level
-                                     << "  " << left << setw(10) << func_name;
-                                
-                                // Show "-" for labels, actual size for others
-                                if (strcmp(symtab[j].kind, "label") == 0) {
-                                    cout << "  " << right << setw(5) << "-" << endl;
-                                } else {
-                                    cout << "  " << right << setw(5) << symtab[j].size << endl;
-                                }
+                    // Print header for this scope level and block
+                    cout << ">>> SCOPE LEVEL " << scope_level << " (" << func_name << " - block_" << block_id << ") <<<" << endl;
+                    
+                    // Print all symbols in this scope and block
+                    for (int j = 0; j < symCount; j++) {
+                        if (symtab[j].scope_level == scope_level && 
+                            strcmp(symtab[j].function_scope, func_name) == 0 &&
+                            symtab[j].block_id == block_id) {
+                            // Indent based on scope level
+                            for (int indent = 0; indent < scope_level; indent++) {
+                                cout << "  ";
+                            }
+                            
+                            cout << left << setw(18) << symtab[j].name
+                                 << "  " << setw(20) << getDisplayType(&symtab[j])
+                                 << "  " << setw(20) << symtab[j].kind
+                                 << "  " << right << setw(5) << symtab[j].scope_level
+                                 << "  " << left << setw(10) << func_name;
+                            
+                            // Show "-" for labels, actual size for others
+                            if (strcmp(symtab[j].kind, "label") == 0) {
+                                cout << "  " << right << setw(5) << "-" << endl;
+                            } else {
+                                cout << "  " << right << setw(5) << symtab[j].size << endl;
                             }
                         }
                     }
