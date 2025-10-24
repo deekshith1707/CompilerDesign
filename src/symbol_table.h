@@ -34,6 +34,7 @@ typedef struct Symbol {
     char kind[32];
     int scope_level;      // Hierarchical scope: 0=global, 1=function parameters/locals
     int parent_scope;     // Parent scope level (-1 for global scope)
+    int block_id;         // Unique identifier for each nested block
     int offset;
     int size;
     int is_array;
@@ -60,6 +61,9 @@ extern int current_offset;
 extern char currentType[128];
 extern char current_function[128];  // Track which function we're currently in
 extern int next_scope;              // Next scope number to assign (sequential)
+extern int current_block_id;        // Unique ID for current nested block
+extern int next_block_id;           // Counter for assigning unique block IDs
+extern int parent_blocks[100];      // Stack of parent block IDs
 
 // Struct definition table
 extern StructDef structTable[MAX_STRUCTS];
