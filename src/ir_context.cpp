@@ -173,6 +173,11 @@ string convertToThreeAddress(const Quadruple& quad) {
         return arg2 + "->" + arg1 + " = " + result;
     }
     
+    // Type casting operations: result = cast_op(arg1)
+    else if (op.substr(0, 5) == "CAST_") {
+        return result + " = " + op + "(" + arg1 + ")";
+    }
+    
     // Default case - return original format for unknown operations
     else {
         return string(quad.op) + " " + string(quad.arg1) + " " + string(quad.arg2) + " " + string(quad.result);

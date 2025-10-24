@@ -150,9 +150,8 @@ char* generate_ir(TreeNode* node) {
         case NODE_CHAR_CONSTANT:
         case NODE_STRING_LITERAL:
         {
-            char* temp = newTemp();
-            emit("ASSIGN", node->value, "", temp);
-            return temp;
+            // Return the constant value directly - don't create unnecessary temporaries
+            return strdup(node->value);
         }
         
         case NODE_IDENTIFIER:
