@@ -116,6 +116,9 @@ TypeCheckResult checkArrayAccess(TreeNode* array, TreeNode* index, char** result
 TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, char** result_type);
 
 // Type compatibility functions
+int isArrayType(const char* type);
+char* getArrayBaseType(const char* arrayType);
+char* decayArrayToPointer(const char* type);
 int isPointerCompatible(const char* ptr1, const char* ptr2);
 int isNullPointer(TreeNode* expr);
 int canImplicitConvert(const char* from_type, const char* to_type);
