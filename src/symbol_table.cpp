@@ -739,7 +739,7 @@ void printSymbolTable() {
     
     cout << "------------------------------------------------------------------------------------------------" << endl;
     cout << "User-defined symbols: " << user_symbol_count << " | Max scope level: " << max_scope << endl;
-    cout << "External functions available: " << (symCount - user_symbol_count) << " (stdio.h)" << endl << endl;
+    cout << "External functions available: " << (symCount - user_symbol_count) << " (standard library)" << endl << endl;
 }
 
 // ===== ENHANCED TYPE CHECKING FUNCTIONS =====
@@ -1104,6 +1104,55 @@ TypeCheckResult checkFunctionCall(const char* func_name, TreeNode* args, char** 
     }
     
     *result_type = strdup(func_sym->return_type);
+    
+    // Strict argument checking for specific stdlib functions
+    if (func_sym->is_external) {
+        int provided_args = args ? args->childCount : 0;
+        
+        // Check atoi, atol, atof - expect single char* argument
+        if (strcmp(func_name, "atoi") == 0 || strcmp(func_name, "atol") == 0 || 
+            strcmp(func_name, "atof") == 0) {
+            if (provided_args != 1) {
+                type_error(yylineno, "incorrect number of arguments to '%s' (expected 1, got %d)", 
+                          func_name, provided_args);
+                return TYPE_ERROR;
+            }
+            if (args && args->children[0]->dataType) {
+                const char* arg_type = args->children[0]->dataType;
+                char* arg_decayed = decayArrayToPointer(arg_type);
+                
+                // Must be char* or const char* (pointer to char)
+                if (strcmp(arg_decayed, "char*") != 0 && strcmp(arg_decayed, "const char*") != 0) {
+                    type_error(yylineno, "incorrect argument type to '%s' (expected 'char*', have '%s')", 
+                              func_name, arg_decayed);
+                    free(arg_decayed);
+                    return TYPE_ERROR;
+                }
+                free(arg_decayed);
+            }
+        }
+        // Check abs - expects single int argument
+        else if (strcmp(func_name, "abs") == 0) {
+            if (provided_args != 1) {
+                type_error(yylineno, "incorrect number of arguments to 'abs' (expected 1, got %d)", 
+                          provided_args);
+                return TYPE_ERROR;
+            }
+            if (args && args->children[0]->dataType) {
+                const char* arg_type = args->children[0]->dataType;
+                char* arg_decayed = decayArrayToPointer(arg_type);
+                
+                // Must be int (not float, double, or other types)
+                if (strcmp(arg_decayed, "int") != 0) {
+                    type_error(yylineno, "incorrect argument type to 'abs' (expected 'int', have '%s')", 
+                              arg_decayed);
+                    free(arg_decayed);
+                    return TYPE_ERROR;
+                }
+                free(arg_decayed);
+            }
+        }
+    }
     
     // Check argument count for non-external functions
     if (!func_sym->is_external) {
