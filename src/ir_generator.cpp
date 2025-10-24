@@ -1005,11 +1005,26 @@ char* generate_ir(TreeNode* node) {
                 return operand;
             }
             else if (strcmp(node->value, "&") == 0) {
-                // Address-of
-                char* operand = generate_ir(node->children[0]);
-                char* temp = newTemp();
-                emit("ADDR", operand, "", temp);
-                return temp;
+                // Address-of - special handling for array elements
+                TreeNode* operand_node = node->children[0];
+                
+                // Check if operand is array access: &arr[index]
+                if (operand_node->type == NODE_POSTFIX_EXPRESSION && 
+                    strcmp(operand_node->value, "[]") == 0) {
+                    // Generate: temp = arr + index (proper address arithmetic)
+                    char* array = generate_ir(operand_node->children[0]);
+                    char* index = generate_ir(operand_node->children[1]);
+                    char* temp = newTemp();
+                    emit("ARRAY_ADDR", array, index, temp);
+                    return temp;
+                }
+                else {
+                    // Regular address-of for simple variables
+                    char* operand = generate_ir(operand_node);
+                    char* temp = newTemp();
+                    emit("ADDR", operand, "", temp);
+                    return temp;
+                }
             }
             else if (strcmp(node->value, "*") == 0) {
                 // Dereference
@@ -1074,11 +1089,14 @@ char* generate_ir(TreeNode* node) {
                 // Function call
                 char* func_name = node->children[0]->value;
                 
-                // Process arguments
+                // Process arguments in reverse order for MIPS (right-to-left)
                 int arg_count = 0;
                 if (node->childCount > 1) {
                     TreeNode* args = node->children[1];
-                    for (int i = 0; i < args->childCount; i++) {
+                    arg_count = args->childCount;
+                    
+                    // Push arguments right-to-left for MIPS calling convention
+                    for (int i = args->childCount - 1; i >= 0; i--) {
                         char* arg = generate_ir(args->children[i]);
                         
                         // Handle float-to-double promotion for variadic functions like printf
@@ -1094,7 +1112,6 @@ char* generate_ir(TreeNode* node) {
                         } else {
                             emit("PARAM", arg, "", "");
                         }
-                        arg_count++;
                     }
                 }
                 

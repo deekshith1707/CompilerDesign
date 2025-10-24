@@ -134,6 +134,10 @@ string convertToThreeAddress(const Quadruple& quad) {
     else if (op == "ASSIGN_ARRAY") {
         return arg2 + "[" + arg1 + "] = " + result; // Note: reordered for correct assignment
     }
+    // Array element address: x = &arr[i] (computed as arr + i)
+    else if (op == "ARRAY_ADDR") {
+        return result + " = " + arg1 + " + " + arg2;
+    }
     
     // Function operations: param x, call p,n, return y
     else if (op == "ARG" || op == "PARAM") {
