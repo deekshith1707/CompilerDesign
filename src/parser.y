@@ -262,6 +262,56 @@ int isFunctionDeclarator(TreeNode* node) {
     return 0;
 }
 
+// Helper function to check if array declarator has empty brackets []
+int hasEmptyArrayBrackets(TreeNode* node) {
+    if (!node) return 0;
+    
+    // Check if this is an array declarator with empty brackets
+    if (node->type == NODE_DIRECT_DECLARATOR && node->value && 
+        strcmp(node->value, "array[]") == 0) {
+        return 1;
+    }
+    
+    // Recursively check children
+    for (int i = 0; i < node->childCount; i++) {
+        if (hasEmptyArrayBrackets(node->children[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Helper function to count initializer elements
+int countInitializerElements(TreeNode* initNode) {
+    if (!initNode) return 0;
+    
+    // Check if it's a string literal (for char arrays)
+    if (initNode->type == NODE_STRING_LITERAL && initNode->value) {
+        // Count the string length including NUL terminator
+        // String value includes quotes, so subtract 2 and add 1 for NUL
+        int len = strlen(initNode->value);
+        if (len >= 2 && initNode->value[0] == '"' && initNode->value[len-1] == '"') {
+            return len - 2 + 1;  // -2 for quotes, +1 for NUL
+        }
+        return len + 1;  // Fallback: add 1 for NUL
+    }
+    
+    // Check if it's an initializer list
+    if (initNode->type == NODE_INITIALIZER && initNode->value && 
+        strcmp(initNode->value, "init_list") == 0) {
+        // Count the direct children (each is an initializer element)
+        return initNode->childCount;
+    }
+    
+    // Single expression initializer
+    return 1;
+}
+
+// Helper function to check if base type is char
+int isCharType(const char* type) {
+    return (strcmp(type, "char") == 0);
+}
+
 %}
 
 /* =================================================================== */
@@ -743,9 +793,15 @@ init_declarator:
             int isArray = hasArrayBrackets($1);
             int arrayDims[10] = {0};
             int numDims = 0;
+            int hasEmptyBrackets = hasEmptyArrayBrackets($1);
             
             if (isArray) {
                 numDims = extractArrayDimensions($1, arrayDims, 10);
+                
+                // Check for error: array has empty brackets but no initializer
+                if (hasEmptyBrackets && numDims == 0) {
+                    type_error(yylineno, "array size missing and no initializer");
+                }
             }
             
             char fullType[256];
@@ -758,7 +814,11 @@ init_declarator:
                     strcpy(symtab[symCount - 1].kind, "typedef");
                 }
             } else {
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+                // Only insert if no errors occurred
+                if (error_count == semantic_error_count) {
+                    insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+                }
+                semantic_error_count = error_count;
             }
         }
         $$ = $1;
@@ -770,14 +830,62 @@ init_declarator:
             int isArray = hasArrayBrackets($1);
             int arrayDims[10] = {0};
             int numDims = 0;
+            int hasEmptyBrackets = hasEmptyArrayBrackets($1);
             
             if (isArray) {
                 numDims = extractArrayDimensions($1, arrayDims, 10);
+                
+                // Check for negative array sizes in extracted dimensions
+                for (int i = 0; i < numDims; i++) {
+                    if (arrayDims[i] < 0) {
+                        type_error(yylineno, "negative array size");
+                        break;
+                    }
+                }
+                
+                // Handle array size inference and validation
+                if (hasEmptyBrackets && numDims == 0) {
+                    // Size inference: array has [] and no explicit size
+                    int initCount = countInitializerElements($3);
+                    if (initCount > 0) {
+                        // Infer the size from initializer
+                        arrayDims[0] = initCount;
+                        numDims = 1;
+                    } else {
+                        type_error(yylineno, "array size missing and no initializer");
+                    }
+                } else if (numDims > 0 && arrayDims[0] > 0) {
+                    // Validate: explicit size exists, check initializer count
+                    int initCount = countInitializerElements($3);
+                    if (initCount > arrayDims[0]) {
+                        char fullType[256];
+                        buildFullType(fullType, currentType, ptrLevel);
+                        type_error(yylineno, "too many initializers for '%s[%d]'", 
+                                  fullType, arrayDims[0]);
+                    }
+                    // Partial initialization is OK (initCount < arrayDims[0])
+                }
             }
             
             char fullType[256];
             buildFullType(fullType, currentType, ptrLevel);
-            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+            
+            // Type check initialization: check if trying to initialize scalar with array
+            if (!isArray && ptrLevel == 0 && $3->dataType && isArrayType($3->dataType)) {
+                // Trying to initialize non-pointer scalar with array
+                char* base_type = getArrayBaseType($3->dataType);
+                if (base_type) {
+                    type_error(yylineno, "cannot convert array type '%s' to '%s'", $3->dataType, base_type);
+                } else {
+                    type_error(yylineno, "cannot convert array type '%s' to '%s'", $3->dataType, fullType);
+                }
+            }
+            
+            // Only insert if no errors occurred
+            if (error_count == semantic_error_count) {
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+            }
+            semantic_error_count = error_count;
             /* emit("ASSIGN", ...) REMOVED */
         }
         
@@ -831,7 +939,26 @@ direct_declarator:
     | direct_declarator LBRACKET constant_expression RBRACKET { 
         $$ = createNode(NODE_DIRECT_DECLARATOR, "array");
         addChild($$, $1);
-        if ($3) addChild($$, $3);  // Store the dimension
+        
+        // Validate array size
+        if ($3) {
+            // Check if the size expression is of integer type
+            if ($3->dataType && !isIntegerType($3->dataType)) {
+                if ($3->value) {
+                    type_error(yylineno, "invalid array size '%s'", $3->value);
+                } else {
+                    type_error(yylineno, "invalid array size (non-integer type)");
+                }
+            } 
+            // Check if size is a negative constant
+            else if ($3->value) {
+                int size = atoi($3->value);
+                if (size < 0) {
+                    type_error(yylineno, "negative array size");
+                }
+            }
+            addChild($$, $3);  // Store the dimension
+        }
     }
     | direct_declarator LPAREN RPAREN {
         $$ = $1;
@@ -1553,6 +1680,14 @@ unary_expression:
         $$ = createNode(NODE_UNARY_EXPRESSION, "-_unary");
         addChild($$, $2);
         $$->dataType = $2->dataType ? strdup($2->dataType) : NULL;
+        
+        // Compute the negated value if the operand is a constant
+        if ($2->value) {
+            int val = atoi($2->value);
+            char negVal[32];
+            snprintf(negVal, sizeof(negVal), "%d", -val);
+            $$->value = strdup(negVal);
+        }
         /* $$->tacResult = ... REMOVED */
     }
     | BITWISE_NOT cast_expression {
