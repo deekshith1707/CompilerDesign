@@ -184,6 +184,27 @@ string convertToThreeAddress(const Quadruple& quad) {
         return result + " = " + op + "(" + arg1 + ")";
     }
     
+    // Increment/Decrement operations: result = arg1 + 1, result = arg1 - 1
+    else if (op == "INC") {
+        return result + " = " + arg1 + " + 1";
+    }
+    else if (op == "DEC") {
+        return result + " = " + arg1 + " - 1";
+    }
+    
+    // Pointer arithmetic: result = arg1 + arg2 (pointer arithmetic)
+    else if (op == "PTR_ADD") {
+        return result + " = " + arg1 + " + " + arg2;
+    }
+    else if (op == "PTR_SUB") {
+        return result + " = " + arg1 + " - " + arg2;
+    }
+    
+    // Type promotion: result = (double)arg1
+    else if (op == "FLOAT_TO_DOUBLE") {
+        return result + " = (double)" + arg1;
+    }
+    
     // Default case - return original format for unknown operations
     else {
         return string(quad.op) + " " + string(quad.arg1) + " " + string(quad.arg2) + " " + string(quad.result);

@@ -451,21 +451,30 @@ char* generate_ir(TreeNode* node) {
                 char* incr_label = newLabel();
                 char* end_label = newLabel();
                 
-                // Init
-                if (node->childCount > 0 && node->children[0]->type != NODE_EXPRESSION_STATEMENT) {
-                    generate_ir(node->children[0]);
+                // Init - handle both declarations and expressions
+                if (node->childCount > 0 && node->children[0]) {
+                    // Check if it's not an empty expression statement
+                    if (!(node->children[0]->type == NODE_EXPRESSION_STATEMENT && 
+                          (!node->children[0]->value || strlen(node->children[0]->value) == 0))) {
+                        generate_ir(node->children[0]);
+                    }
                 }
                 
                 emit("LABEL", cond_label, "", "");
                 
                 pushLoopLabels(incr_label, end_label);
                 
-                // Condition
+                // Condition - handle empty condition (infinite loop)
                 if (node->childCount > 1 && node->children[1]) {
-                    char* cond_result = generate_ir(node->children[1]);
-                    if (cond_result) {
-                        emit("IF_FALSE_GOTO", cond_result, end_label, "");
+                    // Check if condition is not empty
+                    if (!(node->children[1]->type == NODE_EXPRESSION_STATEMENT && 
+                          (!node->children[1]->value || strlen(node->children[1]->value) == 0))) {
+                        char* cond_result = generate_ir(node->children[1]);
+                        if (cond_result && strlen(cond_result) > 0) {
+                            emit("IF_FALSE_GOTO", cond_result, end_label, "");
+                        }
                     }
+                    // If condition is empty, no conditional jump - infinite loop until break
                 }
                 
                 // Body
@@ -475,9 +484,13 @@ char* generate_ir(TreeNode* node) {
                 
                 emit("LABEL", incr_label, "", "");
                 
-                // Increment
+                // Increment - handle empty increment
                 if (node->childCount > 2 && node->children[2]) {
-                    generate_ir(node->children[2]);
+                    // Check if increment is not empty
+                    if (!(node->children[2]->type == NODE_EXPRESSION_STATEMENT && 
+                          (!node->children[2]->value || strlen(node->children[2]->value) == 0))) {
+                        generate_ir(node->children[2]);
+                    }
                 }
                 
                 emit("GOTO", cond_label, "", "");
@@ -860,19 +873,52 @@ char* generate_ir(TreeNode* node) {
             char* left = generate_ir(node->children[0]);
             char* right = generate_ir(node->children[1]);
             
-            // Handle type conversions if needed
+            // Special handling for pointer arithmetic
+            bool is_pointer_arithmetic = false;
             if (node->children[0]->dataType && node->children[1]->dataType) {
-                char* result_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
-                left = convertType(left, node->children[0]->dataType, result_type);
-                right = convertType(right, node->children[1]->dataType, result_type);
+                // Check if this is pointer + integer or array + integer
+                // Simple pointer check: contains '*'
+                bool is_pointer = (strchr(node->children[0]->dataType, '*') != nullptr);
+                if ((is_pointer || isArrayType(node->children[0]->dataType)) &&
+                    isIntegerType(node->children[1]->dataType)) {
+                    is_pointer_arithmetic = true;
+                }
             }
             
             char* temp = newTemp();
             
             if (strcmp(node->value, "+") == 0) {
-                emit("ADD", left, right, temp);
+                if (is_pointer_arithmetic) {
+                    // For pointer arithmetic, use address computation instead of type casting
+                    // For arrays, use address of first element
+                    if (isArrayType(node->children[0]->dataType)) {
+                        char* addr_temp = newTemp();
+                        emit("ADDR", left, "", addr_temp);  // Get address of array start
+                        emit("PTR_ADD", addr_temp, right, temp);  // Proper pointer arithmetic
+                    } else {
+                        emit("PTR_ADD", left, right, temp);  // Proper pointer arithmetic
+                    }
+                } else {
+                    // Handle regular arithmetic type conversions
+                    if (node->children[0]->dataType && node->children[1]->dataType) {
+                        char* result_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
+                        left = convertType(left, node->children[0]->dataType, result_type);
+                        right = convertType(right, node->children[1]->dataType, result_type);
+                    }
+                    emit("ADD", left, right, temp);
+                }
             } else if (strcmp(node->value, "-") == 0) {
-                emit("SUB", left, right, temp);
+                if (is_pointer_arithmetic) {
+                    emit("PTR_SUB", left, right, temp);  // Proper pointer arithmetic
+                } else {
+                    // Handle regular arithmetic type conversions
+                    if (node->children[0]->dataType && node->children[1]->dataType) {
+                        char* result_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
+                        left = convertType(left, node->children[0]->dataType, result_type);
+                        right = convertType(right, node->children[1]->dataType, result_type);
+                    }
+                    emit("SUB", left, right, temp);
+                }
             }
             return temp;
         }
@@ -913,19 +959,15 @@ char* generate_ir(TreeNode* node) {
         case NODE_UNARY_EXPRESSION:
         {
             if (strcmp(node->value, "++_pre") == 0) {
-                // Pre-increment
+                // Pre-increment - optimize to direct increment
                 char* operand = node->children[0]->value;
-                char* temp = newTemp();
-                emit("ADD", operand, "1", temp);
-                emit("ASSIGN", temp, "", operand);
+                emit("INC", operand, "", operand);  // Direct increment without temp
                 return operand;
             }
             else if (strcmp(node->value, "--_pre") == 0) {
-                // Pre-decrement
+                // Pre-decrement - optimize to direct decrement
                 char* operand = node->children[0]->value;
-                char* temp = newTemp();
-                emit("SUB", operand, "1", temp);
-                emit("ASSIGN", temp, "", operand);
+                emit("DEC", operand, "", operand);  // Direct decrement without temp
                 return operand;
             }
             else if (strcmp(node->value, "&") == 0) {
@@ -1004,7 +1046,20 @@ char* generate_ir(TreeNode* node) {
                     TreeNode* args = node->children[1];
                     for (int i = 0; i < args->childCount; i++) {
                         char* arg = generate_ir(args->children[i]);
-                        emit("PARAM", arg, "", "");
+                        
+                        // Handle float-to-double promotion for variadic functions like printf
+                        if (func_name && (strcmp(func_name, "printf") == 0 || 
+                                         strcmp(func_name, "fprintf") == 0 || 
+                                         strcmp(func_name, "sprintf") == 0) && 
+                            args->children[i]->dataType && 
+                            strcmp(args->children[i]->dataType, "float") == 0) {
+                            // Promote float to double for variadic functions
+                            char* promoted_arg = newTemp();
+                            emit("FLOAT_TO_DOUBLE", arg, "", promoted_arg);
+                            emit("PARAM", promoted_arg, "", "");
+                        } else {
+                            emit("PARAM", arg, "", "");
+                        }
                         arg_count++;
                     }
                 }
@@ -1032,20 +1087,16 @@ char* generate_ir(TreeNode* node) {
             else if (strcmp(node->value, "++_post") == 0) {
                 char* operand = node->children[0]->value;
                 char* temp = newTemp();
-                emit("ASSIGN", operand, "", temp);
-                char* temp2 = newTemp();
-                emit("ADD", operand, "1", temp2);
-                emit("ASSIGN", temp2, "", operand);
-                return temp;
+                emit("ASSIGN", operand, "", temp);  // Save old value
+                emit("INC", operand, "", operand);  // Direct increment
+                return temp;  // Return old value
             }
             else if (strcmp(node->value, "--_post") == 0) {
                 char* operand = node->children[0]->value;
                 char* temp = newTemp();
-                emit("ASSIGN", operand, "", temp);
-                char* temp2 = newTemp();
-                emit("SUB", operand, "1", temp2);
-                emit("ASSIGN", temp2, "", operand);
-                return temp;
+                emit("ASSIGN", operand, "", temp);  // Save old value
+                emit("DEC", operand, "", operand);  // Direct decrement
+                return temp;  // Return old value
             }
             return NULL;
         }
