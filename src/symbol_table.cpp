@@ -439,18 +439,18 @@ void exitFunctionScope() {
 }
 
 void enterScope() {
-    // For nested blocks inside functions - use scope level 2
     // Push current scope onto parent stack
     if (scope_depth < 100) {
         parent_scopes[scope_depth] = current_scope;
         scope_depth++;
     }
-    current_scope = 2;  // Nested blocks use scope 2
+    // Increment scope level for nested blocks
+    current_scope++;
 }
 
 void exitScope() {
     // Don't remove symbols - keep them for symbol table display
-    // Just update the current scope level
+    // Restore the parent scope level
     if (scope_depth > 0) {
         scope_depth--;
         current_scope = parent_scopes[scope_depth];
@@ -664,55 +664,70 @@ void printSymbolTable() {
         }
     }
     
-    // Print nested block scope (2)
-    bool has_nested_scope = false;
+    // Find max scope level first
+    int max_scope = 0;
     for (int i = 0; i < symCount; i++) {
-        if (symtab[i].scope_level == 2) {
-            has_nested_scope = true;
-            break;
+        if (symtab[i].scope_level > max_scope) {
+            max_scope = symtab[i].scope_level;
         }
     }
     
-    if (has_nested_scope) {
-        // Group by function name
-        char processed_functions[100][128];
-        int processed_count = 0;
-        
+    // Print all nested block scopes (2 and above) dynamically
+    for (int scope_level = 2; scope_level <= max_scope; scope_level++) {
+        bool has_this_scope = false;
         for (int i = 0; i < symCount; i++) {
-            if (symtab[i].scope_level == 2 && strlen(symtab[i].function_scope) > 0) {
-                const char* func_name = symtab[i].function_scope;
-                
-                // Check if we've already processed this function
-                bool already_processed = false;
-                for (int j = 0; j < processed_count; j++) {
-                    if (strcmp(processed_functions[j], func_name) == 0) {
-                        already_processed = true;
-                        break;
+            if (symtab[i].scope_level == scope_level) {
+                has_this_scope = true;
+                break;
+            }
+        }
+        
+        if (has_this_scope) {
+            // Group by function name
+            char processed_functions[100][128];
+            int processed_count = 0;
+            
+            for (int i = 0; i < symCount; i++) {
+                if (symtab[i].scope_level == scope_level && strlen(symtab[i].function_scope) > 0) {
+                    const char* func_name = symtab[i].function_scope;
+                    
+                    // Check if we've already processed this function
+                    bool already_processed = false;
+                    for (int j = 0; j < processed_count; j++) {
+                        if (strcmp(processed_functions[j], func_name) == 0) {
+                            already_processed = true;
+                            break;
+                        }
                     }
-                }
-                
-                if (!already_processed) {
-                    // Add to processed list
-                    strcpy(processed_functions[processed_count], func_name);
-                    processed_count++;
                     
-                    // Print header for this function's nested blocks
-                    cout << ">>> SCOPE LEVEL 2 (" << func_name << " - nested) <<<" << endl;
-                    
-                    // Print all symbols in this function's nested scope
-                    for (int j = 0; j < symCount; j++) {
-                        if (symtab[j].scope_level == 2 && strcmp(symtab[j].function_scope, func_name) == 0) {
-                            cout << "    " << left << setw(16) << symtab[j].name
-                                 << "  " << setw(20) << getDisplayType(&symtab[j])
-                                 << "  " << setw(20) << symtab[j].kind
-                                 << "  " << right << setw(5) << symtab[j].scope_level
-                                 << "  " << left << setw(10) << func_name;  // Show function name instead of numeric parent_scope
-                            
-                            // Show "-" for labels, actual size for others
-                            if (strcmp(symtab[j].kind, "label") == 0) {
-                                cout << "  " << right << setw(5) << "-" << endl;
-                            } else {
-                                cout << "  " << right << setw(5) << symtab[j].size << endl;
+                    if (!already_processed) {
+                        // Add to processed list
+                        strcpy(processed_functions[processed_count], func_name);
+                        processed_count++;
+                        
+                        // Print header for this scope level
+                        cout << ">>> SCOPE LEVEL " << scope_level << " (" << func_name << " - nested) <<<" << endl;
+                        
+                        // Print all symbols in this scope
+                        for (int j = 0; j < symCount; j++) {
+                            if (symtab[j].scope_level == scope_level && strcmp(symtab[j].function_scope, func_name) == 0) {
+                                // Indent based on scope level
+                                for (int indent = 0; indent < scope_level; indent++) {
+                                    cout << "  ";
+                                }
+                                
+                                cout << left << setw(18) << symtab[j].name
+                                     << "  " << setw(20) << getDisplayType(&symtab[j])
+                                     << "  " << setw(20) << symtab[j].kind
+                                     << "  " << right << setw(5) << symtab[j].scope_level
+                                     << "  " << left << setw(10) << func_name;
+                                
+                                // Show "-" for labels, actual size for others
+                                if (strcmp(symtab[j].kind, "label") == 0) {
+                                    cout << "  " << right << setw(5) << "-" << endl;
+                                } else {
+                                    cout << "  " << right << setw(5) << symtab[j].size << endl;
+                                }
                             }
                         }
                     }
@@ -726,14 +741,6 @@ void printSymbolTable() {
     for (int i = 0; i < symCount; i++) {
         if (!symtab[i].is_external) {
             user_symbol_count++;
-        }
-    }
-    
-    // Find max scope level
-    int max_scope = 0;
-    for (int i = 0; i < symCount; i++) {
-        if (symtab[i].scope_level > max_scope) {
-            max_scope = symtab[i].scope_level;
         }
     }
     
