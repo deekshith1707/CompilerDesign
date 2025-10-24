@@ -1291,15 +1291,13 @@ inclusive_or_expression:
         $$ = $1;
     }
     | inclusive_or_expression BITWISE_OR exclusive_or_expression {
-        if ($1->dataType && !isArithmeticType($1->dataType)) {
-            yyerror("Bitwise OR requires arithmetic types");
-        }
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp("|", $1, $3, &result_type);
+        
         $$ = createNode(NODE_INCLUSIVE_OR_EXPRESSION, "|");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     ;
 
@@ -1308,15 +1306,13 @@ exclusive_or_expression:
         $$ = $1;
     }
     | exclusive_or_expression BITWISE_XOR and_expression {
-        if ($1->dataType && !isArithmeticType($1->dataType)) {
-            yyerror("Bitwise XOR requires arithmetic types");
-        }
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp("^", $1, $3, &result_type);
+        
         $$ = createNode(NODE_EXCLUSIVE_OR_EXPRESSION, "^");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     ;
 
@@ -1325,15 +1321,13 @@ and_expression:
         $$ = $1;
     }
     | and_expression BITWISE_AND equality_expression {
-        if ($1->dataType && !isArithmeticType($1->dataType)) {
-            yyerror("Bitwise AND requires arithmetic types");
-        }
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp("&", $1, $3, &result_type);
+        
         $$ = createNode(NODE_AND_EXPRESSION, "&");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     ;
 
@@ -1402,20 +1396,22 @@ shift_expression:
         $$ = $1;
     }
     | shift_expression LSHIFT additive_expression {
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp("<<", $1, $3, &result_type);
+        
         $$ = createNode(NODE_SHIFT_EXPRESSION, "<<");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     | shift_expression RSHIFT additive_expression {
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp(">>", $1, $3, &result_type);
+        
         $$ = createNode(NODE_SHIFT_EXPRESSION, ">>");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     ;
 
