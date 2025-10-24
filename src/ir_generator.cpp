@@ -37,6 +37,7 @@ static LoopContext loopStack[MAX_LOOP_DEPTH];
 static int loopDepth = 0;
 static SwitchContext switchStack[MAX_LOOP_DEPTH];
 static int switchDepth = 0;
+static int switchCount = 0;
 
 // Helper functions for control flow
 static void pushLoopLabels(char* continue_label, char* break_label) {
@@ -61,12 +62,14 @@ static char* getCurrentLoopBreak() {
     return (loopDepth > 0) ? loopStack[loopDepth - 1].break_label : NULL;
 }
 
-static void pushSwitchLabel(char* end_label) {
+static void pushSwitchLabel(char* end_label, char* default_label) {
     if (switchDepth >= MAX_LOOP_DEPTH) {
         cerr << "Error: Switch nesting too deep" << endl;
         return;
     }
+    switchStack[switchDepth].switch_id = switchCount++;
     switchStack[switchDepth].end_label = end_label;
+    switchStack[switchDepth].default_label = default_label;
     switchDepth++;
 }
 
@@ -76,6 +79,14 @@ static void popSwitchLabel() {
 
 static char* getCurrentSwitchEnd() {
     return (switchDepth > 0) ? switchStack[switchDepth - 1].end_label : NULL;
+}
+
+static int getCurrentSwitchId() {
+    return (switchDepth > 0) ? switchStack[switchDepth - 1].switch_id : -1;
+}
+
+static char* getCurrentSwitchDefault() {
+    return (switchDepth > 0) ? switchStack[switchDepth - 1].default_label : NULL;
 }
 
 static char* get_constant_value_from_expression(TreeNode* node) {
@@ -99,7 +110,7 @@ static char* get_constant_value_from_expression(TreeNode* node) {
     return NULL; // Not a simple constant
 }
 
-static void find_case_labels(TreeNode* node, std::vector<CaseLabel>& cases, char** default_label) {
+static void find_case_labels(TreeNode* node, std::vector<CaseLabel>& cases, char** default_label, int switch_id) {
     if (!node) return;
 
     if (node->type == NODE_LABELED_STATEMENT) {
@@ -107,20 +118,22 @@ static void find_case_labels(TreeNode* node, std::vector<CaseLabel>& cases, char
             char* const_val = get_constant_value_from_expression(node->children[0]);
             if (const_val) {
                 char label_name[128];
-                sprintf(label_name, "CASE_%s", const_val);
+                sprintf(label_name, "SWITCH_%d_CASE_%s", switch_id, const_val);
                 cases.push_back({strdup(const_val), strdup(label_name)});
             }
             // Continue searching in the statement *after* the label
             if (node->childCount > 1) {
-                find_case_labels(node->children[1], cases, default_label);
+                find_case_labels(node->children[1], cases, default_label, switch_id);
             }
             return; // Stop recursion down this branch, we've handled it.
         }
         else if (strcmp(node->value, "default") == 0) {
-            *default_label = strdup("DEFAULT");
+            char default_name[128];
+            sprintf(default_name, "SWITCH_%d_DEFAULT", switch_id);
+            *default_label = strdup(default_name);
             // Continue searching in the statement *after* the label
             if (node->childCount > 0) {
-                find_case_labels(node->children[0], cases, default_label);
+                find_case_labels(node->children[0], cases, default_label, switch_id);
             }
             return; // Stop recursion
         }
@@ -133,7 +146,7 @@ static void find_case_labels(TreeNode* node, std::vector<CaseLabel>& cases, char
 
     // Recurse
     for (int i = 0; i < node->childCount; i++) {
-        find_case_labels(node->children[i], cases, default_label);
+        find_case_labels(node->children[i], cases, default_label, switch_id);
     }
 }
 
@@ -320,17 +333,22 @@ char* generate_ir(TreeNode* node) {
                 // 1. Generate code for the switch expression
                 char* switch_expr = generate_ir(node->children[0]);
                 char* switch_end = newLabel();
-                pushSwitchLabel(switch_end);
+                
+                // Get the current switch ID (before pushing)
+                int current_switch_id = switchCount;
                 
                 // === PASS 1: Collect all case/default labels ===
                 std::vector<CaseLabel> case_labels;
                 char* default_label = NULL;
                 
                 if (node->childCount > 1) {
-                    find_case_labels(node->children[1], case_labels, &default_label);
+                    find_case_labels(node->children[1], case_labels, &default_label, current_switch_id);
                 }
                 
                 char* final_default_label = default_label ? default_label : switch_end;
+                
+                // Push switch context with proper default label
+                pushSwitchLabel(switch_end, final_default_label);
                 
                 // === GENERATE DISPATCH LOGIC ===
                 for (const auto& cl : case_labels) {
@@ -550,9 +568,17 @@ char* generate_ir(TreeNode* node) {
                 if (node->childCount > 0) {
                     char* const_val = get_constant_value_from_expression(node->children[0]);
                     if (const_val) {
-                        char case_label[128];
-                        sprintf(case_label, "CASE_%s", const_val);
-                        emit("LABEL", case_label, "", "");
+                        int switch_id = getCurrentSwitchId();
+                        if (switch_id >= 0) {
+                            char case_label[128];
+                            sprintf(case_label, "SWITCH_%d_CASE_%s", switch_id, const_val);
+                            emit("LABEL", case_label, "", "");
+                        } else {
+                            // Fallback to old behavior if no switch context
+                            char case_label[128];
+                            sprintf(case_label, "CASE_%s", const_val);
+                            emit("LABEL", case_label, "", "");
+                        }
                     } else {
                         // This is an error, case expressions must be constant
                         cerr << "Error: case expression is not a simple constant." << endl;
@@ -564,10 +590,18 @@ char* generate_ir(TreeNode* node) {
                 }
             }
             else if (strcmp(node->value, "default") == 0) {
-                emit("LABEL", "DEFAULT", "", "");
+                int switch_id = getCurrentSwitchId();
+                if (switch_id >= 0) {
+                    char default_label[128];
+                    sprintf(default_label, "SWITCH_%d_DEFAULT", switch_id);
+                    emit("LABEL", default_label, "", "");
+                } else {
+                    // Fallback to old behavior if no switch context
+                    emit("LABEL", "DEFAULT", "", "");
+                }
                 if (node->childCount > 0) {
                     generate_ir(node->children[0]);
-                    }
+                }
             }
             return NULL;
         }

@@ -17,7 +17,9 @@ typedef struct {
 } LoopContext;
 
 typedef struct {
+    int switch_id;
     char* end_label;
+    char* default_label;
 } SwitchContext;
 
 #ifdef __cplusplus
