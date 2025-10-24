@@ -754,67 +754,97 @@ TypeCheckResult checkBinaryOp(const char* op, TreeNode* left, TreeNode* right, c
     const char* ltype = left->dataType;
     const char* rtype = right->dataType;
     
+    // Apply array-to-pointer decay for binary operators (not for sizeof or &)
+    char* ltype_decayed = decayArrayToPointer(ltype);
+    char* rtype_decayed = decayArrayToPointer(rtype);
+    
     // Arithmetic operators: +, -, *, /, %
     if (strcmp(op, "+") == 0) {
         // Case 1: both arithmetic
-        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
-            *result_type = strdup(usualArithConv(ltype, rtype));
+        if (isArithmeticType(ltype_decayed) && isArithmeticType(rtype_decayed)) {
+            *result_type = strdup(usualArithConv(ltype_decayed, rtype_decayed));
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
-        // Case 2: pointer + integer
-        if (strstr(ltype, "*") && isArithmeticType(rtype)) {
-            *result_type = strdup(ltype);
+        // Case 2: pointer + integer (or array + integer after decay)
+        if (strstr(ltype_decayed, "*") && isArithmeticType(rtype_decayed)) {
+            *result_type = strdup(ltype_decayed);
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
-        // Case 3: integer + pointer
-        if (isArithmeticType(ltype) && strstr(rtype, "*")) {
-            *result_type = strdup(rtype);
+        // Case 3: integer + pointer (or integer + array after decay)
+        if (isArithmeticType(ltype_decayed) && strstr(rtype_decayed, "*")) {
+            *result_type = strdup(rtype_decayed);
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
         type_error(yylineno, "invalid operands to binary '+' (have '%s' and '%s')", ltype, rtype);
+        free(ltype_decayed);
+        free(rtype_decayed);
         return TYPE_ERROR;
     }
     
     if (strcmp(op, "-") == 0) {
         // Case 1: both arithmetic
-        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
-            *result_type = strdup(usualArithConv(ltype, rtype));
+        if (isArithmeticType(ltype_decayed) && isArithmeticType(rtype_decayed)) {
+            *result_type = strdup(usualArithConv(ltype_decayed, rtype_decayed));
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
-        // Case 2: pointer - integer
-        if (strstr(ltype, "*") && isArithmeticType(rtype)) {
-            *result_type = strdup(ltype);
+        // Case 2: pointer - integer (or array - integer after decay)
+        if (strstr(ltype_decayed, "*") && isArithmeticType(rtype_decayed)) {
+            *result_type = strdup(ltype_decayed);
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
         // Case 3: pointer - pointer (same base type)
-        if (strstr(ltype, "*") && strstr(rtype, "*")) {
-            if (isPointerCompatible(ltype, rtype)) {
+        if (strstr(ltype_decayed, "*") && strstr(rtype_decayed, "*")) {
+            if (isPointerCompatible(ltype_decayed, rtype_decayed)) {
                 *result_type = strdup("int"); // ptrdiff_t
+                free(ltype_decayed);
+                free(rtype_decayed);
                 return TYPE_OK;
             }
             type_error(yylineno, "invalid operands to binary '-' (incompatible pointer types)");
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_ERROR;
         }
         type_error(yylineno, "invalid operands to binary '-' (have '%s' and '%s')", ltype, rtype);
+        free(ltype_decayed);
+        free(rtype_decayed);
         return TYPE_ERROR;
     }
     
     if (strcmp(op, "*") == 0 || strcmp(op, "/") == 0) {
-        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
-            *result_type = strdup(usualArithConv(ltype, rtype));
+        if (isArithmeticType(ltype_decayed) && isArithmeticType(rtype_decayed)) {
+            *result_type = strdup(usualArithConv(ltype_decayed, rtype_decayed));
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
         type_error(yylineno, "invalid operands to binary '%s' (have '%s' and '%s')", op, ltype, rtype);
+        free(ltype_decayed);
+        free(rtype_decayed);
         return TYPE_ERROR;
     }
     
     if (strcmp(op, "%") == 0) {
         // Modulo requires integer operands (not float/double)
-        if (isIntegerType(ltype) && isIntegerType(rtype)) {
+        if (isIntegerType(ltype_decayed) && isIntegerType(rtype_decayed)) {
             *result_type = strdup("int");
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
         type_error(yylineno, "invalid operands to binary '%%' (have '%s' and '%s')", ltype, rtype);
+        free(ltype_decayed);
+        free(rtype_decayed);
         return TYPE_ERROR;
     }
     
@@ -822,47 +852,63 @@ TypeCheckResult checkBinaryOp(const char* op, TreeNode* left, TreeNode* right, c
     if (strcmp(op, "<") == 0 || strcmp(op, ">") == 0 || 
         strcmp(op, "<=") == 0 || strcmp(op, ">=") == 0) {
         // Both arithmetic OR both compatible pointers
-        if ((isArithmeticType(ltype) && isArithmeticType(rtype)) ||
-            (strstr(ltype, "*") && strstr(rtype, "*") && isPointerCompatible(ltype, rtype))) {
+        if ((isArithmeticType(ltype_decayed) && isArithmeticType(rtype_decayed)) ||
+            (strstr(ltype_decayed, "*") && strstr(rtype_decayed, "*") && isPointerCompatible(ltype_decayed, rtype_decayed))) {
             *result_type = strdup("int");
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
         type_error(yylineno, "invalid operands to binary '%s' (have '%s' and '%s')", op, ltype, rtype);
+        free(ltype_decayed);
+        free(rtype_decayed);
         return TYPE_ERROR;
     }
     
     // Equality operators: ==, !=
     if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
         // Both arithmetic, or both pointers, or pointer vs null
-        if ((isArithmeticType(ltype) && isArithmeticType(rtype)) ||
-            (strstr(ltype, "*") && strstr(rtype, "*")) ||
-            (strstr(ltype, "*") && isNullPointer(right)) ||
-            (isNullPointer(left) && strstr(rtype, "*"))) {
+        if ((isArithmeticType(ltype_decayed) && isArithmeticType(rtype_decayed)) ||
+            (strstr(ltype_decayed, "*") && strstr(rtype_decayed, "*")) ||
+            (strstr(ltype_decayed, "*") && isNullPointer(right)) ||
+            (isNullPointer(left) && strstr(rtype_decayed, "*"))) {
             *result_type = strdup("int");
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
         type_error(yylineno, "invalid operands to binary '%s' (have '%s' and '%s')", op, ltype, rtype);
+        free(ltype_decayed);
+        free(rtype_decayed);
         return TYPE_ERROR;
     }
     
     // Bitwise operators: &, |, ^, <<, >>
     if (strcmp(op, "&") == 0 || strcmp(op, "|") == 0 || strcmp(op, "^") == 0) {
         // Bitwise operators require integer operands (not float/double)
-        if (isIntegerType(ltype) && isIntegerType(rtype)) {
+        if (isIntegerType(ltype_decayed) && isIntegerType(rtype_decayed)) {
             *result_type = strdup("int");
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
         type_error(yylineno, "invalid operands to binary '%s' (have '%s' and '%s')", op, ltype, rtype);
+        free(ltype_decayed);
+        free(rtype_decayed);
         return TYPE_ERROR;
     }
     
     if (strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) {
         // Shift operators require integer operands (not float/double)
-        if (isIntegerType(ltype) && isIntegerType(rtype)) {
-            *result_type = strdup(ltype); // Result type is left operand type
+        if (isIntegerType(ltype_decayed) && isIntegerType(rtype_decayed)) {
+            *result_type = strdup(ltype_decayed); // Result type is left operand type
+            free(ltype_decayed);
+            free(rtype_decayed);
             return TYPE_OK;
         }
         type_error(yylineno, "invalid operands to binary '%s' (have '%s' and '%s')", op, ltype, rtype);
+        free(ltype_decayed);
+        free(rtype_decayed);
         return TYPE_ERROR;
     }
     
@@ -870,9 +916,13 @@ TypeCheckResult checkBinaryOp(const char* op, TreeNode* left, TreeNode* right, c
     if (strcmp(op, "&&") == 0 || strcmp(op, "||") == 0) {
         // Any scalar type can be converted to boolean
         *result_type = strdup("int");
+        free(ltype_decayed);
+        free(rtype_decayed);
         return TYPE_OK;
     }
     
+    free(ltype_decayed);
+    free(rtype_decayed);
     *result_type = strdup("int");
     return TYPE_ERROR;
 }
@@ -964,46 +1014,77 @@ TypeCheckResult checkAssignment(TreeNode* lhs, TreeNode* rhs) {
     const char* ltype = lhs->dataType;
     const char* rtype = rhs->dataType;
     
+    // Check for invalid array assignments (arrays cannot be assigned)
+    // LHS should not be an array type (individual elements are OK via indexing)
+    if (isArrayType(ltype)) {
+        type_error(yylineno, "cannot assign arrays");
+        return TYPE_ERROR;
+    }
+    
+    // Check if trying to assign array to scalar (before decay)
+    if (isArrayType(rtype) && !strstr(ltype, "*")) {
+        // Trying to assign array to non-pointer type (e.g., int x = arr;)
+        // Extract base type from array for error message
+        char* base_type = getArrayBaseType(rtype);
+        if (base_type) {
+            type_error(yylineno, "cannot convert array type '%s' to '%s'", rtype, base_type);
+        } else {
+            type_error(yylineno, "cannot convert array type '%s' to '%s'", rtype, ltype);
+        }
+        return TYPE_ERROR;
+    }
+    
+    // Apply array-to-pointer decay on RHS (arrays decay when used as rvalues)
+    char* rtype_decayed = decayArrayToPointer(rtype);
+    
     // Same type
-    if (strcmp(ltype, rtype) == 0) {
+    if (strcmp(ltype, rtype_decayed) == 0) {
+        free(rtype_decayed);
         return TYPE_OK;
     }
     
     // Arithmetic conversion
-    if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
-        if (strcmp(ltype, "char") == 0 && strcmp(rtype, "int") == 0) {
+    if (isArithmeticType(ltype) && isArithmeticType(rtype_decayed)) {
+        if (strcmp(ltype, "char") == 0 && strcmp(rtype_decayed, "int") == 0) {
             type_warning(yylineno, "conversion from 'int' to 'char' may alter value");
         }
+        free(rtype_decayed);
         return TYPE_OK;
     }
     
-    // Pointer assignments
-    if (strstr(ltype, "*") && strstr(rtype, "*")) {
-        if (isPointerCompatible(ltype, rtype)) {
+    // Pointer assignments (including array-to-pointer decay)
+    if (strstr(ltype, "*") && strstr(rtype_decayed, "*")) {
+        if (isPointerCompatible(ltype, rtype_decayed)) {
+            free(rtype_decayed);
             return TYPE_OK;
         }
         type_warning(yylineno, "assignment from incompatible pointer type");
+        free(rtype_decayed);
         return TYPE_WARNING;
     }
     
     // Pointer = NULL
     if (strstr(ltype, "*") && isNullPointer(rhs)) {
+        free(rtype_decayed);
         return TYPE_OK;
     }
     
     // Pointer = integer (error unless 0)
-    if (strstr(ltype, "*") && isArithmeticType(rtype)) {
+    if (strstr(ltype, "*") && isArithmeticType(rtype_decayed)) {
         type_error(yylineno, "assignment makes pointer from integer without a cast");
+        free(rtype_decayed);
         return TYPE_ERROR;
     }
     
     // Integer = pointer (error)
-    if (isArithmeticType(ltype) && strstr(rtype, "*")) {
+    if (isArithmeticType(ltype) && strstr(rtype_decayed, "*")) {
         type_error(yylineno, "assignment makes integer from pointer without a cast");
+        free(rtype_decayed);
         return TYPE_ERROR;
     }
     
     type_error(yylineno, "incompatible types when assigning to type '%s' from type '%s'", ltype, rtype);
+    free(rtype_decayed);
     return TYPE_ERROR;
 }
 
@@ -1057,25 +1138,93 @@ TypeCheckResult checkArrayAccess(TreeNode* array, TreeNode* index, char** result
         return TYPE_ERROR;
     }
     
-    // Index must be integer type
-    if (!isArithmeticType(index->dataType)) {
-        type_error(yylineno, "array subscript is not an integer");
+    // Apply array-to-pointer decay on index (for syntax like arr[arr2])
+    char* index_decayed = decayArrayToPointer(index->dataType);
+    
+    // Index must be integer type (not float or double)
+    if (!isIntegerType(index_decayed)) {
+        type_error(yylineno, "array subscript has non-integer type '%s'", index_decayed);
+        free(index_decayed);
+        *result_type = strdup("int");
         return TYPE_ERROR;
     }
+    free(index_decayed);
     
-    // Array must be array or pointer type
+    // Array must be array or pointer type (arrays automatically decay to pointers)
     const char* array_type = array->dataType;
-    if (strstr(array_type, "[") || strstr(array_type, "*")) {
-        // Simplified: assume element type is int
-        *result_type = strdup("int");
+    char* array_decayed = decayArrayToPointer(array_type);
+    
+    if (strstr(array_decayed, "*")) {
+        // Extract element type by removing one level of pointer/indirection
+        // For "int*" or "int *" -> "int", for "char*" -> "char", etc.
+        char elem_type[128];
+        const char* star = strchr(array_decayed, '*');
+        if (star) {
+            size_t len = star - array_decayed;
+            strncpy(elem_type, array_decayed, len);
+            elem_type[len] = '\0';
+            
+            // Trim trailing spaces
+            int end = len - 1;
+            while (end >= 0 && elem_type[end] == ' ') {
+                elem_type[end] = '\0';
+                end--;
+            }
+            
+            *result_type = strdup(elem_type);
+        } else {
+            *result_type = strdup("int");
+        }
+        free(array_decayed);
         return TYPE_OK;
     }
     
     type_error(yylineno, "subscripted value is not an array or pointer");
+    free(array_decayed);
     return TYPE_ERROR;
 }
 
 // Helper functions
+
+// Check if a type is an array type (contains '[')
+int isArrayType(const char* type) {
+    return (type && strstr(type, "[") != NULL);
+}
+
+// Extract base type from array type (e.g., "int[10]" -> "int")
+char* getArrayBaseType(const char* arrayType) {
+    if (!arrayType) return NULL;
+    
+    static char baseType[128];
+    const char* bracket = strchr(arrayType, '[');
+    if (bracket) {
+        size_t len = bracket - arrayType;
+        if (len < sizeof(baseType)) {
+            strncpy(baseType, arrayType, len);
+            baseType[len] = '\0';
+            return baseType;
+        }
+    }
+    return strdup(arrayType);
+}
+
+// Array-to-pointer decay: converts T[N] to T* in expression contexts
+// Returns the decayed type (caller must free) or original type if no decay
+char* decayArrayToPointer(const char* type) {
+    if (!type) return NULL;
+    
+    if (isArrayType(type)) {
+        // Extract base type and make it a pointer
+        char* baseType = getArrayBaseType(type);
+        char* ptrType = (char*)malloc(strlen(baseType) + 2);
+        sprintf(ptrType, "%s*", baseType);
+        return ptrType;
+    }
+    
+    // Not an array, return copy of original type
+    return strdup(type);
+}
+
 int isPointerCompatible(const char* ptr1, const char* ptr2) {
     // Simplified: void* is compatible with any pointer
     if (strstr(ptr1, "void*") || strstr(ptr2, "void*")) {
