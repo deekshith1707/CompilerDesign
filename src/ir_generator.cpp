@@ -10,6 +10,19 @@
 
 using namespace std;
 
+// Helper function to extract identifier name from declarator tree
+static const char* extractIdentifierFromDeclarator(TreeNode* node) {
+    if (!node) return NULL;
+    if (node->type == NODE_IDENTIFIER) return node->value;
+    
+    // Traverse through pointers and other declarator constructs
+    for (int i = 0; i < node->childCount; i++) {
+        const char* name = extractIdentifierFromDeclarator(node->children[i]);
+        if (name) return name;
+    }
+    return NULL;
+}
+
 // Struct to hold case label info
 struct CaseLabel {
     char* value;
@@ -909,13 +922,21 @@ char* generate_ir(TreeNode* node) {
             
             // Special handling for pointer arithmetic
             bool is_pointer_arithmetic = false;
+            bool is_ptr_ptr_subtraction = false;
             if (node->children[0]->dataType && node->children[1]->dataType) {
                 // Check if this is pointer + integer or array + integer
                 // Simple pointer check: contains '*'
-                bool is_pointer = (strchr(node->children[0]->dataType, '*') != nullptr);
-                if ((is_pointer || isArrayType(node->children[0]->dataType)) &&
+                bool left_is_pointer = (strchr(node->children[0]->dataType, '*') != nullptr);
+                bool right_is_pointer = (strchr(node->children[1]->dataType, '*') != nullptr);
+                
+                if ((left_is_pointer || isArrayType(node->children[0]->dataType)) &&
                     isIntegerType(node->children[1]->dataType)) {
                     is_pointer_arithmetic = true;
+                }
+                
+                // Check for pointer - pointer subtraction
+                if (left_is_pointer && right_is_pointer && strcmp(node->value, "-") == 0) {
+                    is_ptr_ptr_subtraction = true;
                 }
             }
             
@@ -942,7 +963,10 @@ char* generate_ir(TreeNode* node) {
                     emit("ADD", left, right, temp);
                 }
             } else if (strcmp(node->value, "-") == 0) {
-                if (is_pointer_arithmetic) {
+                if (is_ptr_ptr_subtraction) {
+                    // Pointer-pointer subtraction: no type conversion needed
+                    emit("PTR_SUB", left, right, temp);
+                } else if (is_pointer_arithmetic) {
                     emit("PTR_SUB", left, right, temp);  // Proper pointer arithmetic
                 } else {
                     // Handle regular arithmetic type conversions
@@ -983,8 +1007,31 @@ char* generate_ir(TreeNode* node) {
 
         case NODE_CAST_EXPRESSION:
         {
-            // Just process the expression being cast
-            if (node->childCount > 0) {
+            // Generate cast operation in IR
+            if (node->childCount >= 2) {
+                // Child 0: type_name (the target type)
+                // Child 1: expression being cast
+                TreeNode* type_node = node->children[0];
+                TreeNode* expr_node = node->children[1];
+                
+                char* expr_result = generate_ir(expr_node);
+                if (!expr_result) return NULL;
+                
+                // For now, just pass through the expression
+                // In a full implementation, you might generate explicit CAST operations
+                // For pointer casts especially, we should document the cast in IR
+                char* temp = newTemp();
+                char cast_info[256];
+                
+                // Build cast information from source and target types
+                const char* src_type = expr_node->dataType ? expr_node->dataType : "unknown";
+                const char* tgt_type = node->dataType ? node->dataType : "unknown";
+                
+                sprintf(cast_info, "CAST_%s_to_%s", src_type, tgt_type);
+                emit(cast_info, expr_result, "", temp);
+                return temp;
+            } else if (node->childCount > 0) {
+                // Fallback: just process the expression
                 return generate_ir(node->children[0]);
             }
             return NULL;
@@ -1089,14 +1136,14 @@ char* generate_ir(TreeNode* node) {
                 // Function call
                 char* func_name = node->children[0]->value;
                 
-                // Process arguments in reverse order for MIPS (right-to-left)
+                // Process arguments in order (left-to-right as they appear in source)
                 int arg_count = 0;
                 if (node->childCount > 1) {
                     TreeNode* args = node->children[1];
                     arg_count = args->childCount;
                     
-                    // Push arguments right-to-left for MIPS calling convention
-                    for (int i = args->childCount - 1; i >= 0; i--) {
+                    // Process arguments in source order for clarity in IR
+                    for (int i = 0; i < args->childCount; i++) {
                         char* arg = generate_ir(args->children[i]);
                         
                         // Handle float-to-double promotion for variadic functions like printf
@@ -1171,18 +1218,8 @@ char* generate_ir(TreeNode* node) {
                 TreeNode* declarator = node->children[0];
                 char* lhs_name = NULL;
                 
-                // Extract the actual variable name from the declarator
-                if (declarator->type == NODE_IDENTIFIER) {
-                    lhs_name = declarator->value;
-                } else if (declarator->childCount > 0) {
-                    // Look for identifier in children (for complex declarators)
-                    for (int i = 0; i < declarator->childCount; i++) {
-                        if (declarator->children[i]->type == NODE_IDENTIFIER) {
-                            lhs_name = declarator->children[i]->value;
-                            break;
-                        }
-                    }
-                }
+                // Extract the actual variable name from the declarator using helper
+                lhs_name = (char*)extractIdentifierFromDeclarator(declarator);
                 
                 if (!lhs_name) {
                     lhs_name = declarator->value; // fallback

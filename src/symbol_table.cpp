@@ -995,8 +995,26 @@ TypeCheckResult checkUnaryOp(const char* op, TreeNode* operand, char** result_ty
     if (strcmp(op, "*") == 0) {
         if (strstr(optype, "*")) {
             // Remove one level of pointer indirection
-            // Simplified: assume result is int for now
-            *result_type = strdup("int");
+            char* result_type_str = (char*)malloc(strlen(optype) + 1);
+            strcpy(result_type_str, optype);
+            
+            // Find the last '*' and remove it
+            char* last_star = strrchr(result_type_str, '*');
+            if (last_star) {
+                *last_star = '\0';
+                // Remove trailing spaces
+                while (last_star > result_type_str && *(last_star - 1) == ' ') {
+                    *(--last_star) = '\0';
+                }
+            }
+            
+            // If result becomes empty or just spaces, default to int
+            if (strlen(result_type_str) == 0 || strspn(result_type_str, " ") == strlen(result_type_str)) {
+                free(result_type_str);
+                *result_type = strdup("int");
+            } else {
+                *result_type = result_type_str;
+            }
             return TYPE_OK;
         }
         type_error(yylineno, "invalid type argument of unary '*' (have '%s')", optype);
@@ -1130,12 +1148,18 @@ TypeCheckResult checkFunctionCall(const char* func_name, TreeNode* args, char** 
         return TYPE_ERROR;
     }
     
-    if (!func_sym->is_function) {
-        type_error(yylineno, "called object '%s' is not a function", func_name);
+    if (!func_sym->is_function && strcmp(func_sym->kind, "function_pointer") != 0) {
+        type_error(yylineno, "called object '%s' is not a function or function pointer", func_name);
         return TYPE_ERROR;
     }
     
-    *result_type = strdup(func_sym->return_type);
+    if (strcmp(func_sym->kind, "function_pointer") == 0) {
+        // For function pointers, extract return type from the type string
+        // For now, default to int (would need more sophisticated parsing)
+        *result_type = strdup("int");
+    } else {
+        *result_type = strdup(func_sym->return_type);
+    }
     
     // Strict argument checking for specific stdlib functions
     if (func_sym->is_external) {
@@ -1186,8 +1210,8 @@ TypeCheckResult checkFunctionCall(const char* func_name, TreeNode* args, char** 
         }
     }
     
-    // Check argument count for non-external functions
-    if (!func_sym->is_external) {
+    // Check argument count for non-external functions (but not function pointers)
+    if (!func_sym->is_external && strcmp(func_sym->kind, "function_pointer") != 0) {
         int provided_args = args ? args->childCount : 0;
         if (provided_args != func_sym->param_count) {
             type_error(yylineno, "too %s arguments to function '%s' (expected %d, got %d)",
