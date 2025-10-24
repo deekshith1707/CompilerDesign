@@ -102,6 +102,7 @@ PREPROCESSOR    ^[ \t]*#[ \t]*[a-zA-Z]+
 "bool"          { update_position(); return BOOL; }
 "true"          { update_position(); yylval.node = createNode(NODE_CONSTANT, "1"); return INTEGER_CONSTANT; }
 "false"         { update_position(); yylval.node = createNode(NODE_CONSTANT, "0"); return INTEGER_CONSTANT; }
+"NULL"          { update_position(); yylval.node = createNode(NODE_CONSTANT, "0"); return INTEGER_CONSTANT; }
 "struct"        { update_position(); return STRUCT; }
 "enum"          { update_position(); return ENUM; }
 "union"         { update_position(); return UNION; }

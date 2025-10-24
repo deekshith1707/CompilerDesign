@@ -370,7 +370,7 @@ int isCharType(const char* type) {
 %type <node> statement labeled_statement compound_statement block_item_list block_item
 %type <node> expression_statement
 %type <node> selection_statement iteration_statement jump_statement
-%type <node> if_header marker_while_start for_label_marker for_init_statement for_increment_expression
+%type <node> if_header marker_while_start for_label_marker
 %type <node> expression assignment_expression conditional_expression
 %type <node> logical_or_expression logical_and_expression
 %type <node> inclusive_or_expression exclusive_or_expression and_expression
@@ -458,6 +458,29 @@ preprocessor_directive:
             insertExternalFunction("puts", "int");
             insertExternalFunction("getchar", "int");
             insertExternalFunction("putchar", "int");
+        }
+        // Check if this is #include <stdlib.h> and insert standard library functions
+        if ($1 && $1->value && strstr($1->value, "stdlib.h")) {
+            // Insert common stdlib.h functions
+            insertExternalFunction("atoi", "int");
+            insertExternalFunction("atof", "double");
+            insertExternalFunction("atol", "long");
+            insertExternalFunction("malloc", "void*");
+            insertExternalFunction("calloc", "void*");
+            insertExternalFunction("realloc", "void*");
+            insertExternalFunction("free", "void");
+            insertExternalFunction("exit", "void");
+            insertExternalFunction("abort", "void");
+            insertExternalFunction("system", "int");
+            insertExternalFunction("getenv", "char*");
+            insertExternalFunction("rand", "int");
+            insertExternalFunction("srand", "void");
+            insertExternalFunction("abs", "int");
+            insertExternalFunction("labs", "long");
+            insertExternalFunction("div", "div_t");
+            insertExternalFunction("ldiv", "ldiv_t");
+            insertExternalFunction("qsort", "void");
+            insertExternalFunction("bsearch", "void*");
         }
         $$ = NULL; 
     }
@@ -881,6 +904,29 @@ init_declarator:
                 }
             }
             
+            // Type check initialization: pointer = non-zero integer (error)
+            if (ptrLevel > 0 && $3->dataType && !isNullPointer($3)) {
+                char* init_decayed = decayArrayToPointer($3->dataType);
+                // If initializer is not a pointer and not NULL, it's an error
+                if (!strstr(init_decayed, "*") && !isArithmeticType(init_decayed)) {
+                    type_error(yylineno, "initialization makes pointer from integer without a cast");
+                } else if (isArithmeticType(init_decayed)) {
+                    // Integer to pointer (not NULL)
+                    type_error(yylineno, "initialization makes pointer from integer without a cast");
+                }
+                free(init_decayed);
+            }
+            
+            // Type check initialization: integer = pointer (error)
+            if (!isArray && ptrLevel == 0 && $3->dataType && isArithmeticType(fullType)) {
+                char* init_decayed = decayArrayToPointer($3->dataType);
+                if (strstr(init_decayed, "*")) {
+                    // Trying to initialize integer with pointer
+                    type_error(yylineno, "initialization makes integer from pointer without a cast");
+                }
+                free(init_decayed);
+            }
+            
             // Only insert if no errors occurred
             if (error_count == semantic_error_count) {
                 insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
@@ -1147,18 +1193,6 @@ for_label_marker: %empty {
     /* All label, stack, and emit logic REMOVED */
 };
 
-for_init_statement:
-    expression_statement { $$ = $1; }
-    | declaration { $$ = $1; }
-    ;
-
-for_increment_expression:
-    %empty { 
-        $$ = createNode(NODE_EXPRESSION_STATEMENT, "");  // Empty increment expression
-    }
-    | expression { $$ = $1; }
-    ;
-
 selection_statement:
     if_header statement %prec LOWER_THAN_ELSE {
         /* emit("LABEL", ...) REMOVED */
@@ -1229,31 +1263,25 @@ iteration_statement:
         addChild($$, $2); // statement
         recovering_from_error = 0;
     }
-    | FOR LPAREN {
-        // Enter a new scope for the for loop (for C99-style variable declarations)
-        enterScope();
-    }
-        for_init_statement                    // $4: init (can be declaration or expression)
-        for_label_marker                      // $5: marker
-        expression_statement                  // $6: cond
+    | FOR LPAREN
+        expression_statement                  // $3: init
+        for_label_marker                      // $4: marker
+        expression_statement                  // $5: cond
         { 
             /* emit("IF_FALSE_GOTO", ...) REMOVED */
         }
-        for_increment_expression              // $8: incr (optional expression)
-        RPAREN                                // $9
-        statement                             // $10: body
+        expression                            // $7: incr
+        RPAREN                                // $8
+        statement                             // $9: body
         {
             /* All emit and popLoopLabels logic REMOVED */
             $$ = createNode(NODE_ITERATION_STATEMENT, "for");
-            addChild($$, $4);  // init
-            addChild($$, $6);  // cond
-            addChild($$, $8);  // incr
-            addChild($$, $10); // statement body
-            addChild($$, $5);  // Add the marker node
+            addChild($$, $3);  // init
+            addChild($$, $5);  // cond
+            addChild($$, $7);  // incr
+            addChild($$, $9);  // statement body
+            addChild($$, $4);  // Add the marker node
             recovering_from_error = 0;
-            
-            // Exit the for loop scope
-            exitScope();
         }
     ;
 
