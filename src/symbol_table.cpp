@@ -509,6 +509,11 @@ int isArithmeticType(const char* type) {
             strcmp(type, "float") == 0 || strcmp(type, "double") == 0);
 }
 
+int isIntegerType(const char* type) {
+    return (strcmp(type, "int") == 0 || strcmp(type, "char") == 0 ||
+            strcmp(type, "short") == 0 || strcmp(type, "long") == 0);
+}
+
 char* usualArithConv(const char* t1, const char* t2) {
     static char result[32];
     if (strcmp(t1, "double") == 0 || strcmp(t2, "double") == 0) 
@@ -804,7 +809,8 @@ TypeCheckResult checkBinaryOp(const char* op, TreeNode* left, TreeNode* right, c
     }
     
     if (strcmp(op, "%") == 0) {
-        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+        // Modulo requires integer operands (not float/double)
+        if (isIntegerType(ltype) && isIntegerType(rtype)) {
             *result_type = strdup("int");
             return TYPE_OK;
         }
@@ -841,7 +847,8 @@ TypeCheckResult checkBinaryOp(const char* op, TreeNode* left, TreeNode* right, c
     
     // Bitwise operators: &, |, ^, <<, >>
     if (strcmp(op, "&") == 0 || strcmp(op, "|") == 0 || strcmp(op, "^") == 0) {
-        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+        // Bitwise operators require integer operands (not float/double)
+        if (isIntegerType(ltype) && isIntegerType(rtype)) {
             *result_type = strdup("int");
             return TYPE_OK;
         }
@@ -850,7 +857,8 @@ TypeCheckResult checkBinaryOp(const char* op, TreeNode* left, TreeNode* right, c
     }
     
     if (strcmp(op, "<<") == 0 || strcmp(op, ">>") == 0) {
-        if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+        // Shift operators require integer operands (not float/double)
+        if (isIntegerType(ltype) && isIntegerType(rtype)) {
             *result_type = strdup(ltype); // Result type is left operand type
             return TYPE_OK;
         }
