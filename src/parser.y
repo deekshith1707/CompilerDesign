@@ -837,11 +837,8 @@ init_declarator:
                     strcpy(symtab[symCount - 1].kind, "typedef");
                 }
             } else {
-                // Only insert if no errors occurred
-                if (error_count == semantic_error_count) {
-                    insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
-                }
-                semantic_error_count = error_count;
+                // Always insert to avoid cascading errors
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
             }
         }
         $$ = $1;
@@ -928,10 +925,8 @@ init_declarator:
             }
             
             // Only insert if no errors occurred
-            if (error_count == semantic_error_count) {
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
-            }
-            semantic_error_count = error_count;
+            // Always insert to avoid cascading errors
+            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
             /* emit("ASSIGN", ...) REMOVED */
         }
         
@@ -1883,8 +1878,9 @@ primary_expression:
                 $$->dataType = strdup(sym->is_function ? sym->return_type : sym->type);
                 $$->isLValue = !sym->is_function;
             } else {
-                // Potentially undeclared. Don't error yet.
-                $$->dataType = strdup("int"); // Assume int
+                // Undeclared identifier - report semantic error
+                type_error(yylineno, "'%s' undeclared (first use in this function)", $1->value);
+                $$->dataType = strdup("int"); // Assume int to continue parsing
                 $$->isLValue = 1; // Assume lvalue
             }
             /* $$->tacResult = ... REMOVED */
