@@ -92,6 +92,7 @@ void markRecentSymbolsAsParameters(int count);    // Mark last N symbols as para
 int is_type_name(const char* name);
 int getTypeSize(const char* type);
 int isArithmeticType(const char* type);
+int isIntegerType(const char* type);
 char* usualArithConv(const char* t1, const char* t2);
 int isAssignable(const char* lhs_type, const char* rhs_type);
 void setCurrentType(const char* type);
