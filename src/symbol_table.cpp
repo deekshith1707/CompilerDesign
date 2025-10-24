@@ -1284,7 +1284,8 @@ int isPointerCompatible(const char* ptr1, const char* ptr2) {
 }
 
 int isNullPointer(TreeNode* expr) {
-    if (expr->type == NODE_INTEGER_CONSTANT && strcmp(expr->value, "0") == 0) {
+    // Check for integer constant 0 (NULL pointer constant)
+    if (expr->type == NODE_CONSTANT && strcmp(expr->value, "0") == 0) {
         return 1;
     }
     return 0;
