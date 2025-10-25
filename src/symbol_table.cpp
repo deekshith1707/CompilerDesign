@@ -249,7 +249,7 @@ int getTypeSize(const char* type) {
     return 4;
 }
 
-void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static, int points_to_const, int is_const_ptr) {
+void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static, int points_to_const, int is_const_ptr, int is_reference) {
     if (symCount >= MAX_SYMBOLS) {
         cerr << "Error: Symbol table overflow" << endl;
         return;
@@ -325,6 +325,7 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
     symtab[symCount].points_to_const = points_to_const;  // Track if pointing to const data
     symtab[symCount].is_const_ptr = is_const_ptr;  // Track if pointer itself is const
     symtab[symCount].is_const = (points_to_const || is_const_ptr);  // Either form of const
+    symtab[symCount].is_reference = is_reference;  // Track if this is a reference
     
     // Set the function scope name
     strcpy(symtab[symCount].function_scope, current_function);
@@ -339,6 +340,9 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
             total_elements *= dims[i];
         }
         symtab[symCount].size = base_size * total_elements;
+    } else if (is_reference) {
+        // References are implemented as pointers (store an address)
+        symtab[symCount].size = POINTER_SIZE;
     } else {
         symtab[symCount].size = base_size;
     }
@@ -653,7 +657,7 @@ void insertSymbol(const char* name, const char* type, int is_function, int is_st
     if (is_function) {
         insertFunction(name, type, 0, NULL, NULL, is_static);
     } else {
-        insertVariable(name, type, 0, NULL, 0, 0, is_static, 0, 0);
+        insertVariable(name, type, 0, NULL, 0, 0, is_static, 0, 0, 0);  // Last 0 is for is_reference
     }
 }
 
