@@ -56,6 +56,33 @@ void insertStruct(const char* name, StructMember* members, int member_count) {
         offset += memberSize;
     }
     structTable[structCount].total_size = offset;
+    
+    // Register the struct tag in the symbol table (Scope 0 - global)
+    // Save current scope and temporarily switch to global scope
+    int saved_scope = current_scope;
+    int saved_depth = scope_depth;
+    current_scope = 0;
+    scope_depth = 0;
+    
+    // Insert struct tag as a type symbol in global scope
+    if (symCount < MAX_SYMBOLS) {
+        strcpy(symtab[symCount].name, name);
+        sprintf(symtab[symCount].type, "struct %s", name);
+        strcpy(symtab[symCount].kind, "struct_tag");
+        symtab[symCount].scope_level = 0;
+        symtab[symCount].parent_scope = -1;
+        symtab[symCount].size = offset;
+        symtab[symCount].is_function = 0;
+        symtab[symCount].is_external = 0;
+        symtab[symCount].is_static = 0;
+        strcpy(symtab[symCount].function_scope, "none");
+        symCount++;
+    }
+    
+    // Restore scope
+    current_scope = saved_scope;
+    scope_depth = saved_depth;
+    
     structCount++;
 }
 
@@ -107,6 +134,33 @@ void insertUnion(const char* name, StructMember* members, int member_count) {
         }
     }
     unionTable[unionCount].total_size = maxSize;
+    
+    // Register the union tag in the symbol table (Scope 0 - global)
+    // Save current scope and temporarily switch to global scope
+    int saved_scope = current_scope;
+    int saved_depth = scope_depth;
+    current_scope = 0;
+    scope_depth = 0;
+    
+    // Insert union tag as a type symbol in global scope
+    if (symCount < MAX_SYMBOLS) {
+        strcpy(symtab[symCount].name, name);
+        sprintf(symtab[symCount].type, "union %s", name);
+        strcpy(symtab[symCount].kind, "union_tag");
+        symtab[symCount].scope_level = 0;
+        symtab[symCount].parent_scope = -1;
+        symtab[symCount].size = maxSize;
+        symtab[symCount].is_function = 0;
+        symtab[symCount].is_external = 0;
+        symtab[symCount].is_static = 0;
+        strcpy(symtab[symCount].function_scope, "none");
+        symCount++;
+    }
+    
+    // Restore scope
+    current_scope = saved_scope;
+    scope_depth = saved_depth;
+    
     unionCount++;
 }
 
@@ -1846,6 +1900,93 @@ TypeCheckResult checkArrayAccess(TreeNode* array, TreeNode* index, char** result
     return TYPE_ERROR;
 }
 
+// Member access validation (struct.member or struct->member)
+TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, const char* op, char** result_type) {
+    if (!struct_expr || !struct_expr->dataType || !member || !op) {
+        *result_type = strdup("int");
+        return TYPE_ERROR;
+    }
+    
+    const char* struct_type = struct_expr->dataType;
+    int is_pointer = (strstr(struct_type, "*") != NULL);
+    
+    // ERROR 4: Check operator validity
+    if (strcmp(op, ".") == 0 && is_pointer) {
+        // Using DOT on a pointer - should use ARROW
+        type_error(yylineno, "member reference type '%s' is a pointer; did you mean to use '->'?", struct_type);
+        *result_type = strdup("int");
+        return TYPE_ERROR;
+    }
+    
+    if (strcmp(op, "->") == 0 && !is_pointer) {
+        // Using ARROW on a non-pointer - should use DOT
+        type_error(yylineno, "member reference type '%s' is not a pointer; did you mean to use '.'?", struct_type);
+        *result_type = strdup("int");
+        return TYPE_ERROR;
+    }
+    
+    // Handle pointer to struct (arrow operator case)
+    // If type is "struct Point*", extract "struct Point"
+    char base_type[128];
+    if (is_pointer) {
+        // Remove the pointer part
+        const char* star = strchr(struct_type, '*');
+        size_t len = star - struct_type;
+        strncpy(base_type, struct_type, len);
+        base_type[len] = '\0';
+        
+        // Trim trailing spaces
+        int end = len - 1;
+        while (end >= 0 && base_type[end] == ' ') {
+            base_type[end] = '\0';
+            end--;
+        }
+    } else {
+        strcpy(base_type, struct_type);
+    }
+    
+    // Extract struct/union name from "struct StructName" or "union UnionName"
+    char tag_name[128];
+    int is_union = 0;
+    
+    if (strncmp(base_type, "struct ", 7) == 0) {
+        strcpy(tag_name, base_type + 7);
+        is_union = 0;
+    } else if (strncmp(base_type, "union ", 6) == 0) {
+        strcpy(tag_name, base_type + 6);
+        is_union = 1;
+    } else {
+        // Not a struct or union type
+        type_error(yylineno, "request for member '%s' in something not a structure or union", member);
+        *result_type = strdup("int");
+        return TYPE_ERROR;
+    }
+    
+    // Look up the struct or union definition
+    StructDef* def = is_union ? lookupUnion(tag_name) : lookupStruct(tag_name);
+    if (!def) {
+        type_error(yylineno, "invalid use of undefined %s '%s'", 
+                  is_union ? "union" : "struct", tag_name);
+        *result_type = strdup("int");
+        return TYPE_ERROR;
+    }
+    
+    // Find the member in the struct/union
+    for (int i = 0; i < def->member_count; i++) {
+        if (strcmp(def->members[i].name, member) == 0) {
+            // Found the member - return its type
+            *result_type = strdup(def->members[i].type);
+            return TYPE_OK;
+        }
+    }
+    
+    // Member not found
+    type_error(yylineno, "'%s %s' has no member named '%s'", 
+              is_union ? "union" : "struct", tag_name, member);
+    *result_type = strdup("int");
+    return TYPE_ERROR;
+}
+
 // Helper functions
 
 // Check if a type is an array type (contains '[')
@@ -1937,6 +2078,56 @@ void type_warning(int line, const char* msg, ...) {
     vfprintf(stderr, msg, args);
     fprintf(stderr, "\n");
     va_end(args);
+}
+
+// Check if a type is a scalar type (can be used in conditionals)
+// Scalar types: arithmetic types (int, float, char, etc.) and pointer types
+int isScalarType(const char* type) {
+    if (!type) return 0;
+    
+    // Pointer types are scalar
+    if (strstr(type, "*") != NULL) {
+        return 1;
+    }
+    
+    // Arithmetic types are scalar
+    if (isArithmeticType(type)) {
+        return 1;
+    }
+    
+    // Array types decay to pointers, so they're effectively scalar
+    if (isArrayType(type)) {
+        return 1;
+    }
+    
+    // Struct and union types are NOT scalar
+    if (strncmp(type, "struct ", 7) == 0 || strncmp(type, "union ", 6) == 0) {
+        // Check if it's a pointer to struct/union (already handled above)
+        // If we reach here, it's a direct struct/union, which is not scalar
+        return 0;
+    }
+    
+    return 0;  // Unknown types are not scalar
+}
+
+// ERROR 5: Validate conditional expression (must be scalar type)
+TypeCheckResult validateConditional(TreeNode* expr) {
+    if (!expr || !expr->dataType) {
+        // No type info, assume OK (error already reported elsewhere)
+        return TYPE_OK;
+    }
+    
+    // Apply array-to-pointer decay
+    char* decayed_type = decayArrayToPointer(expr->dataType);
+    
+    if (!isScalarType(decayed_type)) {
+        type_error(yylineno, "conditional expression has non-scalar type '%s'", decayed_type);
+        free(decayed_type);
+        return TYPE_ERROR;
+    }
+    
+    free(decayed_type);
+    return TYPE_OK;
 }
 
 // Helper function to check if declaration_specifiers contains a specific storage class
