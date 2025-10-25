@@ -1479,3 +1479,63 @@ void type_warning(int line, const char* msg, ...) {
     fprintf(stderr, "\n");
     va_end(args);
 }
+
+// Helper function to check if declaration_specifiers contains a specific storage class
+int hasStorageClass(TreeNode* decl_specs, const char* storage_class) {
+    if (!decl_specs || !storage_class) return 0;
+    
+    // Traverse children of declaration_specifiers node
+    for (int i = 0; i < decl_specs->childCount; i++) {
+        TreeNode* child = decl_specs->children[i];
+        if (child->type == NODE_STORAGE_CLASS_SPECIFIER && 
+            child->value && strcmp(child->value, storage_class) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Helper function to check if an expression is a constant expression
+int isConstantExpression(TreeNode* expr) {
+    if (!expr) return 1;  // NULL is considered constant
+    
+    // Check if it's a literal constant
+    if (expr->type == NODE_CONSTANT ||
+        expr->type == NODE_INTEGER_CONSTANT || 
+        expr->type == NODE_FLOAT_CONSTANT ||
+        expr->type == NODE_CHAR_CONSTANT ||
+        expr->type == NODE_HEX_CONSTANT ||
+        expr->type == NODE_OCTAL_CONSTANT ||
+        expr->type == NODE_BINARY_CONSTANT) {
+        return 1;
+    }
+    
+    // Check if it's an identifier - if so, it's NOT a constant expression
+    // (unless it's a const variable, but we'll be conservative)
+    if (expr->type == NODE_IDENTIFIER) {
+        // Check if it's an enum constant (would be in symbol table with kind="enum_constant")
+        Symbol* sym = lookupSymbol(expr->value);
+        if (sym && strcmp(sym->kind, "enum_constant") == 0) {
+            return 1;  // Enum constants are compile-time constants
+        }
+        return 0;  // Variables are not constant expressions
+    }
+    
+    // For compound expressions, recursively check all children
+    // For now, we'll be conservative and require all children to be constant
+    if (expr->childCount > 0) {
+        for (int i = 0; i < expr->childCount; i++) {
+            if (!isConstantExpression(expr->children[i])) {
+                return 0;
+            }
+        }
+        return 1;  // All children are constant
+    }
+    
+    // String literals are constants
+    if (expr->type == NODE_STRING_LITERAL) {
+        return 1;
+    }
+    
+    return 0;  // Unknown node type, assume non-constant
+}
