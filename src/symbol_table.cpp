@@ -1286,11 +1286,13 @@ TypeCheckResult checkArrayAccess(TreeNode* array, TreeNode* index, char** result
     
     if (strstr(array_decayed, "*")) {
         // Extract element type by removing one level of pointer/indirection
-        // For "int*" or "int *" -> "int", for "char*" -> "char", etc.
-        char elem_type[128];
-        const char* star = strchr(array_decayed, '*');
-        if (star) {
-            size_t len = star - array_decayed;
+        // For "char**" -> "char*", for "int*" -> "int", for "char***" -> "char**"
+        
+        // Find the LAST asterisk to remove only one level
+        const char* last_star = strrchr(array_decayed, '*');
+        if (last_star) {
+            size_t len = last_star - array_decayed;
+            char elem_type[128];
             strncpy(elem_type, array_decayed, len);
             elem_type[len] = '\0';
             
