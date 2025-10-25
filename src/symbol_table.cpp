@@ -656,12 +656,12 @@ const char* getDisplayType(const Symbol* sym) {
 void printSymbolTable() {
     cout << "\n=== SYMBOL TABLE (User-Defined Symbols Only) ===" << endl;
     cout << left << setw(20) << "Name"
-         << "  " << setw(20) << "Type"
-         << "  " << setw(20) << "Kind"
-         << "  " << right << setw(5) << "Scope"
-         << "  " << left << setw(10) << "Parent"
-         << "  " << right << setw(5) << "Size" << endl;
-    cout << "------------------------------------------------------------------------------------------------" << endl;
+         << setw(20) << "Type"
+         << setw(20) << "Kind"
+         << setw(5) << "Scope"
+         << setw(20) << "Parent"
+         << setw(4) << "Size" << endl;
+    cout << string(89, '-') << endl;
     
     // Count user-defined symbols in global scope
     int global_user_symbols = 0;
@@ -684,16 +684,16 @@ void printSymbolTable() {
                 }
                 
                 cout << left << setw(20) << symtab[i].name
-                     << "  " << setw(20) << display_type
-                     << "  " << setw(20) << symtab[i].kind
-                     << "  " << right << setw(5) << symtab[i].scope_level
-                     << "  " << left << setw(10) << "none";
+                     << setw(20) << display_type
+                     << setw(20) << symtab[i].kind
+                     << setw(5) << symtab[i].scope_level
+                     << setw(20) << "none";
                 
                 // Show "-" for labels, actual size for others
                 if (strcmp(symtab[i].kind, "label") == 0) {
-                    cout << "  " << right << setw(5) << "-" << endl;
+                    cout << setw(4) << "-" << endl;
                 } else {
-                    cout << "  " << right << setw(5) << symtab[i].size << endl;
+                    cout << setw(4) << symtab[i].size << endl;
                 }
             }
         }
@@ -737,17 +737,17 @@ void printSymbolTable() {
                     // Print all symbols in this function's scope
                     for (int j = 0; j < symCount; j++) {
                         if (symtab[j].scope_level == 1 && strcmp(symtab[j].function_scope, func_name) == 0) {
-                            cout << "  " << left << setw(18) << symtab[j].name
-                                 << "  " << setw(20) << getDisplayType(&symtab[j])
-                                 << "  " << setw(20) << symtab[j].kind
-                                 << "  " << right << setw(5) << symtab[j].scope_level
-                                 << "  " << left << setw(10) << func_name;
+                            cout << left << setw(20) << symtab[j].name
+                                 << setw(20) << getDisplayType(&symtab[j])
+                                 << setw(20) << symtab[j].kind
+                                 << setw(5) << symtab[j].scope_level
+                                 << setw(20) << func_name;
                             
                             // Show "-" for labels, actual size for others
                             if (strcmp(symtab[j].kind, "label") == 0) {
-                                cout << "  " << right << setw(5) << "-" << endl;
+                                cout << setw(4) << "-" << endl;
                             } else {
-                                cout << "  " << right << setw(5) << symtab[j].size << endl;
+                                cout << setw(4) << symtab[j].size << endl;
                             }
                         }
                     }
@@ -803,22 +803,18 @@ void printSymbolTable() {
                         if (symtab[j].scope_level == scope_level && 
                             strcmp(symtab[j].function_scope, func_name) == 0 &&
                             symtab[j].block_id == block_id) {
-                            // Indent based on scope level
-                            for (int indent = 0; indent < scope_level; indent++) {
-                                cout << "  ";
-                            }
                             
-                            cout << left << setw(18) << symtab[j].name
-                                 << "  " << setw(20) << getDisplayType(&symtab[j])
-                                 << "  " << setw(20) << symtab[j].kind
-                                 << "  " << right << setw(5) << symtab[j].scope_level
-                                 << "  " << left << setw(10) << func_name;
+                            cout << left << setw(20) << symtab[j].name
+                                 << setw(20) << getDisplayType(&symtab[j])
+                                 << setw(20) << symtab[j].kind
+                                 << setw(5) << symtab[j].scope_level
+                                 << setw(20) << func_name;
                             
                             // Show "-" for labels, actual size for others
                             if (strcmp(symtab[j].kind, "label") == 0) {
-                                cout << "  " << right << setw(5) << "-" << endl;
+                                cout << setw(4) << "-" << endl;
                             } else {
-                                cout << "  " << right << setw(5) << symtab[j].size << endl;
+                                cout << setw(4) << symtab[j].size << endl;
                             }
                         }
                     }
@@ -835,7 +831,7 @@ void printSymbolTable() {
         }
     }
     
-    cout << "------------------------------------------------------------------------------------------------" << endl;
+    cout << string(89, '-') << endl;
     cout << "User-defined symbols: " << user_symbol_count << " | Max scope level: " << max_scope << endl;
     cout << "External functions available: " << (symCount - user_symbol_count) << " (standard library)" << endl << endl;
 }
