@@ -44,6 +44,7 @@ typedef struct {
     char name[256];
     char type[256];
     int ptrLevel;
+    int isReference;
 } ParamInfo;
 
 ParamInfo pending_params[32];  // Store up to 32 parameters
@@ -87,11 +88,41 @@ int isPointerType(const char* type) {
     return (strchr(type, '*') != NULL);
 }
 
+// Helper function to get the referenced type from a reference type
+// e.g., "int &" -> "int", "char &" -> "char"
+char* stripReferenceType(const char* type) {
+    if (!type) return NULL;
+    
+    // Look for " &" in the type string
+    const char* ref_pos = strstr(type, " &");
+    if (ref_pos) {
+        // Create a copy without the " &" suffix
+        size_t len = ref_pos - type;
+        char* result = (char*)malloc(len + 1);
+        strncpy(result, type, len);
+        result[len] = '\0';
+        return result;
+    }
+    
+    // Not a reference type, return a copy
+    return strdup(type);
+}
+
+// Helper function to check if a NODE_POINTER is a reference
+int isReferenceNode(TreeNode* node) {
+    if (!node) return 0;
+    if (node->type == NODE_POINTER && node->value && strcmp(node->value, "&") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
 // Helper function to count pointer levels in a declarator tree
+// References are treated as pointers for storage purposes
 int countPointerLevels(TreeNode* node) {
     if (!node) return 0;
     if (node->type == NODE_POINTER) {
-        // Count this pointer and any nested pointers
+        // Count this pointer/reference and any nested pointers
         int count = 1;
         for (int i = 0; i < node->childCount; i++) {
             count += countPointerLevels(node->children[i]);
@@ -101,11 +132,45 @@ int countPointerLevels(TreeNode* node) {
     return 0;
 }
 
-// Helper function to build full type string with pointers
+// Helper function to count reference levels in a declarator tree
+int countReferenceLevels(TreeNode* node) {
+    if (!node) return 0;
+    int count = 0;
+    if (isReferenceNode(node)) {
+        count = 1;
+    }
+    for (int i = 0; i < node->childCount; i++) {
+        count += countReferenceLevels(node->children[i]);
+    }
+    return count;  // FIX: was returning 0 instead of count
+}
+
+// Helper function to build full type string with pointers and references
 void buildFullType(char* dest, const char* baseType, int ptrLevel) {
     strcpy(dest, baseType);
     for (int i = 0; i < ptrLevel; i++) {
         strcat(dest, " *");
+    }
+}
+
+// Helper function to build full type string including references
+void buildFullTypeWithRefs(char* dest, const char* baseType, TreeNode* declarator) {
+    strcpy(dest, baseType);
+    
+    // Walk the declarator tree and append * or & as appropriate
+    TreeNode* current = declarator;
+    while (current && current->type == NODE_POINTER) {
+        if (isReferenceNode(current)) {
+            strcat(dest, " &");
+        } else {
+            strcat(dest, " *");
+        }
+        // Move to child (the next declarator level)
+        if (current->childCount > 0) {
+            current = current->children[current->childCount - 1];  // Last child is usually the nested declarator
+        } else {
+            break;
+        }
     }
 }
 
@@ -720,7 +785,7 @@ function_definition:
         
         // Now insert the pending parameters that were stored during parsing
         for (int i = 0; i < pending_param_count; i++) {
-            insertVariable(pending_params[i].name, pending_params[i].type, 0, NULL, 0, pending_params[i].ptrLevel, 0, 0, 0);
+            insertVariable(pending_params[i].name, pending_params[i].type, 0, NULL, 0, pending_params[i].ptrLevel, 0, 0, 0, pending_params[i].isReference);
         }
         // Mark them as parameters
         markRecentSymbolsAsParameters(pending_param_count);
@@ -997,7 +1062,7 @@ enumerator:
     IDENTIFIER {
         if ($1 && $1->value) {
             // Enum constants are integers, so size is 4 bytes
-            insertVariable($1->value, "int", 0, NULL, 0, 0, 0, 0, 0);  // Enum constants are not static
+            insertVariable($1->value, "int", 0, NULL, 0, 0, 0, 0, 0, 0);  // Enum constants are not static or references
             // Update the last inserted symbol's kind to enum_constant and set its value
             if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
                 strcpy(symtab[symCount - 1].kind, "enum_constant");
@@ -1013,7 +1078,7 @@ enumerator:
             int enum_val = evaluateConstantExpression($3);
             
             // Enum constants are integers, so size is 4 bytes
-            insertVariable($1->value, "int", 0, NULL, 0, 0, 0, 0, 0);  // Enum constants are not static
+            insertVariable($1->value, "int", 0, NULL, 0, 0, 0, 0, 0, 0);  // Enum constants are not static or references
             // Update the last inserted symbol's kind to enum_constant and set its value
             if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
                 strcpy(symtab[symCount - 1].kind, "enum_constant");
@@ -1042,6 +1107,8 @@ init_declarator:
         // Skip insertion for function declarators, but not for function pointers
         // Function pointers have parameters AND a pointer level > 0
         int ptrLevel = countPointerLevels($1);
+        int refLevel = countReferenceLevels($1);
+        int isRef = (refLevel > 0);
         int isFuncPtr = isFunctionPointer($1) || (ptrLevel > 0 && pending_param_count > 0);
         
         if (varName && (pending_param_count == 0 || isFuncPtr)) {
@@ -1086,13 +1153,16 @@ init_declarator:
             if (isFuncPtr) {
                 // Build function pointer type
                 buildFunctionPointerType(fullType, currentType, $1);
+            } else if (isRef) {
+                // Build type with reference
+                buildFullTypeWithRefs(fullType, currentType, $1);
             } else {
                 buildFullType(fullType, currentType, ptrLevel);
             }
             
             if (in_typedef) {
                 // Insert the symbol and then manually set its kind to "typedef".
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, 0, has_const_before_ptr, has_const_after_ptr);  // Typedefs are not static
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, 0, has_const_before_ptr, has_const_after_ptr, isRef);  // Typedefs are not static
                 if (symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                     strcpy(symtab[symCount - 1].kind, "typedef");
                 }
@@ -1100,7 +1170,7 @@ init_declarator:
                 // Always insert the variable into the symbol table
                 // The symbol table will handle duplicates within the same scope/block
                 // has_const_before_ptr -> points_to_const, has_const_after_ptr -> is_const_ptr
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static, has_const_before_ptr, has_const_after_ptr);
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static, has_const_before_ptr, has_const_after_ptr, isRef);
                 // Mark as function pointer if needed
                 if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                     strcpy(symtab[symCount - 1].kind, "function_pointer");
@@ -1145,6 +1215,8 @@ init_declarator:
             }
             
             int ptrLevel = countPointerLevels($1);
+            int refLevel = countReferenceLevels($1);
+            int isRef = (refLevel > 0);
             int isArray = hasArrayBrackets($1);
             int arrayDims[10] = {0};
             int numDims = 0;
@@ -1190,6 +1262,9 @@ init_declarator:
             if (isFuncPtr) {
                 // Build function pointer type
                 buildFunctionPointerType(fullType, currentType, $1);
+            } else if (isRef) {
+                // Build type with reference
+                buildFullTypeWithRefs(fullType, currentType, $1);
             } else {
                 buildFullType(fullType, currentType, ptrLevel);
             }
@@ -1244,7 +1319,7 @@ init_declarator:
             
             // Always insert the variable into the symbol table
             // The symbol table will handle duplicates within the same scope/block
-            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static, has_const_before_ptr, has_const_after_ptr);
+            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static, has_const_before_ptr, has_const_after_ptr, isRef);
             // Mark as function pointer if needed
             if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                 strcpy(symtab[symCount - 1].kind, "function_pointer");
@@ -1289,6 +1364,11 @@ declarator:
         addChild($$, $2); // type_qualifier_list
         addChild($$, $3); // declarator
         /* TODO: This should update the pointer level for symbol table */
+    }
+    | BITWISE_AND declarator {
+        // Reference declarator (C++ style: int &x)
+        $$ = createNode(NODE_POINTER, "&");
+        addChild($$, $2);
     }
     ;
 
@@ -1373,22 +1453,31 @@ parameter_declaration:
         addChild($$, $1);
         addChild($$, $2);
         
-        // Extract identifier name and count pointer levels
+        // Extract identifier name and count pointer/reference levels
         const char* paramName = extractIdentifierName($2);
         if (paramName && pending_param_count < 32) {
             int ptrLevel = countPointerLevels($2);
+            int refLevel = countReferenceLevels($2);
+            int isRef = (refLevel > 0);
+            
             // In function parameters, arrays decay to pointers
             // char* argv[] becomes char**, so count array dimensions as additional pointer levels
             int arrayDims = countArrayDimensions($2);
             int totalPtrLevel = ptrLevel + arrayDims;
             
             char fullType[256];
-            buildFullType(fullType, currentType, totalPtrLevel);
+            if (isRef) {
+                // Build type with reference
+                buildFullTypeWithRefs(fullType, currentType, $2);
+            } else {
+                buildFullType(fullType, currentType, totalPtrLevel);
+            }
             
             // Store parameter info for later insertion (if this is a definition)
             strncpy(pending_params[pending_param_count].name, paramName, 255);
             strncpy(pending_params[pending_param_count].type, fullType, 255);
             pending_params[pending_param_count].ptrLevel = totalPtrLevel;
+            pending_params[pending_param_count].isReference = isRef;
             pending_param_count++;
         }
     }
@@ -1421,10 +1510,15 @@ abstract_declarator:
         $$ = createNode(NODE_POINTER, "*");
         // Don't enter scope for abstract declarators
     }
+    | BITWISE_AND {
+        $$ = createNode(NODE_POINTER, "&");
+        // Reference in abstract declarator
+    }
     | direct_abstract_declarator { $$ = $1; }
     | MULTIPLY type_qualifier_list { $$ = createNode(NODE_POINTER, "*"); addChild($$, $2); }
     | MULTIPLY direct_abstract_declarator { $$ = createNode(NODE_POINTER, "*"); addChild($$, $2); }
     | MULTIPLY type_qualifier_list direct_abstract_declarator { $$ = createNode(NODE_POINTER, "*"); addChild($$, $2); addChild($$, $3); }
+    | BITWISE_AND direct_abstract_declarator { $$ = createNode(NODE_POINTER, "&"); addChild($$, $2); }
     ;
 
 direct_abstract_declarator:
@@ -2249,7 +2343,12 @@ unary_expression:
         /* newTemp(), emit("NOT") REMOVED */
         $$ = createNode(NODE_UNARY_EXPRESSION, "!");
         addChild($$, $2);
-        $$->dataType = strdup("int");
+        // Logical NOT returns bool if operand is bool, otherwise int
+        if ($2->dataType && strcmp($2->dataType, "bool") == 0) {
+            $$->dataType = strdup("bool");
+        } else {
+            $$->dataType = strdup("int");
+        }
         /* $$->tacResult = ... REMOVED */
     }
     | SIZEOF unary_expression {
@@ -2352,7 +2451,14 @@ primary_expression:
         if ($1 && $1->value) {
             Symbol* sym = lookupSymbol($1->value);
             if (sym) {
-                $$->dataType = strdup(sym->is_function ? sym->return_type : sym->type);
+                // For references, strip the & to get the underlying type
+                // References should behave like the type they refer to in expressions
+                const char* actualType = sym->is_function ? sym->return_type : sym->type;
+                if (sym->is_reference) {
+                    $$->dataType = stripReferenceType(actualType);
+                } else {
+                    $$->dataType = strdup(actualType);
+                }
                 $$->isLValue = !sym->is_function;
             } else {
                 // Undeclared identifier - report semantic error
