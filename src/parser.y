@@ -1174,8 +1174,9 @@ direct_declarator:
     | direct_declarator LPAREN RPAREN {
         $$ = $1;
         param_count_temp = 0;  // No parameters
+        pending_param_count = 0; // Reset for empty parameter list
     }
-    | direct_declarator LPAREN { param_count_temp = 0; } parameter_type_list RPAREN {
+    | direct_declarator LPAREN { param_count_temp = 0; pending_param_count = 0; } parameter_type_list RPAREN {
         $$ = $1;
     }
     ;

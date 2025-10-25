@@ -313,11 +313,13 @@ char* generate_ir(TreeNode* node) {
             // Child 2: compound_statement
             
             TreeNode* declarator = node->children[1];
+            char* func_name = NULL;
             if (declarator && declarator->value) {
+                func_name = declarator->value;
                 // Set current function name for static variable tracking
-                strcpy(current_function_name, declarator->value);
+                strcpy(current_function_name, func_name);
                 
-                emit("FUNC_BEGIN", declarator->value, "", "");
+                emit("FUNC_BEGIN", func_name, "", "");
             }
             
             // Generate code for function body
@@ -325,8 +327,16 @@ char* generate_ir(TreeNode* node) {
                 generate_ir(node->children[2]);
             }
             
-            if (declarator && declarator->value) {
-                emit("FUNC_END", declarator->value, "", "");
+            // Add explicit return for void functions (for clarity)
+            if (func_name) {
+                extern Symbol* lookupSymbol(const char* name);
+                Symbol* func_sym = lookupSymbol(func_name);
+                if (func_sym && func_sym->is_function && strcmp(func_sym->return_type, "void") == 0) {
+                    // Void function - add explicit return with no value
+                    emit("RETURN", "", "", "");
+                }
+                
+                emit("FUNC_END", func_name, "", "");
                 // Clear current function name
                 current_function_name[0] = '\0';
             }
@@ -1352,9 +1362,19 @@ char* generate_ir(TreeNode* node) {
                     TreeNode* args = node->children[1];
                     arg_count = args->childCount;
                     
-                    // Process arguments in source order for clarity in IR
-                    for (int i = 0; i < args->childCount; i++) {
-                        char* arg = generate_ir(args->children[i]);
+                    // FIXED: Evaluate all arguments FIRST, then emit PARAM instructions
+                    // This ensures nested function calls complete before outer call params are emitted
+                    #define MAX_FUNC_ARGS 32
+                    char* arg_results[MAX_FUNC_ARGS];
+                    
+                    // Step 1: Evaluate all arguments (this may generate nested function calls)
+                    for (int i = 0; i < args->childCount && i < MAX_FUNC_ARGS; i++) {
+                        arg_results[i] = generate_ir(args->children[i]);
+                    }
+                    
+                    // Step 2: Now emit all PARAM instructions in order
+                    for (int i = 0; i < args->childCount && i < MAX_FUNC_ARGS; i++) {
+                        char* arg = arg_results[i];
                         
                         // Handle float-to-double promotion for variadic functions like printf
                         if (func_name && (strcmp(func_name, "printf") == 0 || 
@@ -1372,18 +1392,36 @@ char* generate_ir(TreeNode* node) {
                     }
                 }
                 
-                char* temp = newTemp();
                 char arg_count_str[32];
                 sprintf(arg_count_str, "%d", arg_count);
                 
-                if (is_function_pointer) {
-                    // Indirect call through function pointer
-                    emit("INDIRECT_CALL", func_name, arg_count_str, temp);
-                } else {
-                    // Direct function call
-                    emit("CALL", func_name, arg_count_str, temp);
+                // Check if this is a void function - if so, don't assign result to temporary
+                bool is_void_function = false;
+                if (func_name && !is_function_pointer) {
+                    // Look up the function in the symbol table
+                    extern Symbol* lookupSymbol(const char* name);
+                    Symbol* func_sym = lookupSymbol(func_name);
+                    if (func_sym && func_sym->is_function) {
+                        is_void_function = (strcmp(func_sym->return_type, "void") == 0);
+                    }
                 }
-                return temp;
+                
+                if (is_void_function) {
+                    // Void function - no return value, don't create temporary
+                    emit("CALL", func_name, arg_count_str, "");
+                    return NULL;  // No result to return
+                } else {
+                    // Non-void function - capture return value in temporary
+                    char* temp = newTemp();
+                    if (is_function_pointer) {
+                        // Indirect call through function pointer
+                        emit("INDIRECT_CALL", func_name, arg_count_str, temp);
+                    } else {
+                        // Direct function call
+                        emit("CALL", func_name, arg_count_str, temp);
+                    }
+                    return temp;
+                }
             }
             else if (strcmp(node->value, ".") == 0) {
                 char* struct_var = node->children[0]->value;

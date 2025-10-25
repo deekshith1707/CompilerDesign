@@ -169,12 +169,13 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
         return;
     }
     
-    // Check for duplicate in current scope AND current block
+    // Check for duplicate in current scope AND current block AND current function
     for (int i = symCount - 1; i >= 0; i--) {
         if (strcmp(symtab[i].name, name) == 0 && 
             symtab[i].scope_level == current_scope &&
-            symtab[i].block_id == current_block_id) {
-            return; // Already exists in this specific block
+            symtab[i].block_id == current_block_id &&
+            strcmp(symtab[i].function_scope, current_function) == 0) {
+            return; // Already exists in this specific block of this function
         }
     }
     
@@ -266,10 +267,12 @@ void insertParameter(const char* name, const char* type, int ptr_level) {
         return;
     }
     
-    // Check for duplicate in current scope
+    // Check for duplicate in current scope and current function
     for (int i = symCount - 1; i >= 0; i--) {
-        if (strcmp(symtab[i].name, name) == 0 && symtab[i].scope_level == current_scope) {
-            return; // Already exists
+        if (strcmp(symtab[i].name, name) == 0 && 
+            symtab[i].scope_level == current_scope &&
+            strcmp(symtab[i].function_scope, current_function) == 0) {
+            return; // Already exists in this function scope
         }
     }
     
