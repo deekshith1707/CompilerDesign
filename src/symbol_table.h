@@ -144,6 +144,10 @@ int validateReturn(TreeNode* expr, const char* expected_return_type);
 int validateSwitchCase(TreeNode* switch_expr, TreeNode* case_expr);
 int validateGotoLabel(const char* label);
 
+// Storage class validation
+int hasStorageClass(TreeNode* decl_specs, const char* storage_class);
+int isConstantExpression(TreeNode* expr);
+
 // Type error reporting
 void type_error(int line, const char* msg, ...);
 void type_warning(int line, const char* msg, ...);
