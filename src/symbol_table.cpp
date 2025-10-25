@@ -2149,6 +2149,12 @@ TypeCheckResult validateConditional(TreeNode* expr) {
         return TYPE_OK;
     }
     
+    // Warn if array is used directly in conditional (even though it decays to pointer)
+    if (isArrayType(expr->dataType)) {
+        type_warning(yylineno, "array '%s' used in conditional context will always evaluate to true", 
+                     expr->dataType);
+    }
+    
     // Apply array-to-pointer decay
     char* decayed_type = decayArrayToPointer(expr->dataType);
     
