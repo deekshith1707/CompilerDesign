@@ -1039,6 +1039,20 @@ char* generate_ir(TreeNode* node) {
 
         case NODE_UNARY_EXPRESSION:
         {
+            // Special case: if this node already has the complete value (e.g., "-2147483647")
+            // as a pre-computed literal, use it directly instead of generating IR
+            if (node->value && (node->value[0] == '-' || node->value[0] == '+') && 
+                node->childCount == 1 && 
+                (node->children[0]->type == NODE_CONSTANT || 
+                 node->children[0]->type == NODE_INTEGER_CONSTANT ||
+                 node->children[0]->type == NODE_HEX_CONSTANT ||
+                 node->children[0]->type == NODE_OCTAL_CONSTANT ||
+                 node->children[0]->type == NODE_BINARY_CONSTANT ||
+                 node->children[0]->type == NODE_FLOAT_CONSTANT)) {
+                // The value is already a complete literal (like "-2147483647" or "-0x7FFFFFFF")
+                return strdup(node->value);
+            }
+            
             if (strcmp(node->value, "++_pre") == 0) {
                 // Pre-increment - optimize to direct increment
                 char* operand = node->children[0]->value;
@@ -1274,4 +1288,4 @@ char* generate_ir(TreeNode* node) {
             return NULL;
         }
     }
-}
+}   
