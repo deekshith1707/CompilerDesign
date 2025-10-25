@@ -379,6 +379,17 @@ void insertLabel(const char* name) {
         return;
     }
     
+    // Check for duplicate label in the current function (labels have function scope in C)
+    for (int i = 0; i < symCount; i++) {
+        if (strcmp(symtab[i].name, name) == 0 && 
+            strcmp(symtab[i].kind, "label") == 0 &&
+            strcmp(symtab[i].function_scope, current_function) == 0) {
+            // Duplicate label found in same function
+            type_error(yylineno, "Duplicate label '%s'", name);
+            return;  // Don't insert duplicate
+        }
+    }
+    
     strcpy(symtab[symCount].name, name);
     strcpy(symtab[symCount].type, "-");  // Labels don't have a type
     strcpy(symtab[symCount].kind, "label");
@@ -395,6 +406,18 @@ void insertLabel(const char* name) {
     symtab[symCount].size = 0;  // Labels don't occupy storage
     
     symCount++;
+}
+
+Symbol* lookupLabel(const char* name) {
+    // Labels have function scope in C, so search within current function
+    for (int i = 0; i < symCount; i++) {
+        if (strcmp(symtab[i].name, name) == 0 && 
+            strcmp(symtab[i].kind, "label") == 0 &&
+            strcmp(symtab[i].function_scope, current_function) == 0) {
+            return &symtab[i];
+        }
+    }
+    return NULL;
 }
 
 Symbol* lookupSymbol(const char* name) {
