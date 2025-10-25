@@ -1449,6 +1449,11 @@ expression_statement:
         $$ = $1;
         recovering_from_error = 0;
     }
+    | error SEMICOLON {
+        $$ = createNode(NODE_EXPRESSION_STATEMENT, "error_recovery");
+        yyerrok;
+        recovering_from_error = 1;
+    }
     ;
 
 if_header:
@@ -1553,6 +1558,16 @@ do_trailer:
         
         $$ = createNode(NODE_ITERATION_STATEMENT, "do_until");
         addChild($$, $3); // expression
+    }
+    | WHILE LPAREN error RPAREN SEMICOLON {
+        // Error recovery: malformed while condition
+        $$ = createNode(NODE_ITERATION_STATEMENT, "do_while_error");
+        yyerrok;
+    }
+    | UNTIL LPAREN error RPAREN SEMICOLON {
+        // Error recovery: malformed until condition
+        $$ = createNode(NODE_ITERATION_STATEMENT, "do_until_error");
+        yyerrok;
     }
     ;
 
