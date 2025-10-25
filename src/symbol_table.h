@@ -138,6 +138,9 @@ int isNullPointer(TreeNode* expr);
 int canImplicitConvert(const char* from_type, const char* to_type);
 char* getCommonType(const char* type1, const char* type2);
 
+// Typedef resolution
+char* resolveTypedef(const char* type);
+
 // Enhanced validation functions
 int validateBreakContinue(const char* stmt_type);
 int validateReturn(TreeNode* expr, const char* expected_return_type);
