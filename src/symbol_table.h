@@ -52,6 +52,7 @@ typedef struct Symbol {
     int is_const;              // 1 if this is const-qualified (e.g., const int* or int* const)
     int is_const_ptr;          // 1 if this is a const pointer (pointer itself is const, e.g., int* const)
     int points_to_const;       // 1 if this points to const data (e.g., const int*)
+    int is_reference;          // 1 if this is a reference type (C++ style: int &x)
 } Symbol;
 
 // Global symbol table
@@ -81,7 +82,7 @@ extern char function_pointers[MAX_SYMBOLS][128];
 extern int function_pointer_count;
 
 // Function prototypes
-void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static, int points_to_const, int is_const_ptr);
+void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static, int points_to_const, int is_const_ptr, int is_reference);
 void insertParameter(const char* name, const char* type, int ptr_level);  // For function parameters
 void insertFunction(const char* name, const char* ret_type, int param_count, char params[][128], char param_names[][128], int is_static);
 void insertExternalFunction(const char* name, const char* ret_type);  // For library/external functions
