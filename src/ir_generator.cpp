@@ -10,6 +10,86 @@
 
 using namespace std;
 
+// Track current function name for static variable naming
+static char current_function_name[256] = "";
+
+// Helper function to check if a variable is static
+static int isStaticVariable(const char* var_name) {
+    // During IR generation, scope context is not maintained the same way as during parsing
+    // So we need to search through the symbol table manually
+    extern Symbol symtab[];
+    extern int symCount;
+    
+    // First try: exact match in current function context
+    if (current_function_name[0] != '\0') {
+        for (int i = 0; i < symCount; i++) {
+            if (strcmp(symtab[i].name, var_name) == 0 &&
+                strcmp(symtab[i].function_scope, current_function_name) == 0 &&
+                symtab[i].is_static && !symtab[i].is_function) {
+                return 1;
+            }
+        }
+    }
+    
+    // Second try: file-scope static (no function scope)
+    for (int i = 0; i < symCount; i++) {
+        if (strcmp(symtab[i].name, var_name) == 0 &&
+            symtab[i].function_scope[0] == '\0' &&
+            symtab[i].is_static && !symtab[i].is_function) {
+            return 1;
+        }
+    }
+    
+    return 0;
+}
+
+// Helper function to get the full name for a static variable
+static char* getStaticVarName(const char* var_name) {
+    extern Symbol symtab[];
+    extern int symCount;
+    
+    // Search for the symbol to determine its scope
+    Symbol* sym = NULL;
+    
+    // First try: exact match in current function context
+    if (current_function_name[0] != '\0') {
+        for (int i = 0; i < symCount; i++) {
+            if (strcmp(symtab[i].name, var_name) == 0 &&
+                strcmp(symtab[i].function_scope, current_function_name) == 0 &&
+                symtab[i].is_static && !symtab[i].is_function) {
+                sym = &symtab[i];
+                break;
+            }
+        }
+    }
+    
+    // Second try: file-scope static (no function scope)
+    if (!sym) {
+        for (int i = 0; i < symCount; i++) {
+            if (strcmp(symtab[i].name, var_name) == 0 &&
+                symtab[i].function_scope[0] == '\0' &&
+                symtab[i].is_static && !symtab[i].is_function) {
+                sym = &symtab[i];
+                break;
+            }
+        }
+    }
+    
+    if (!sym || !sym->is_static) {
+        return strdup(var_name);
+    }
+    
+    // For file-scope static variables, keep the name as-is
+    if (sym->scope_level == 0 || sym->function_scope[0] == '\0') {
+        return strdup(var_name);
+    }
+    
+    // For function-scope static variables, use functionName.variableName format
+    static char full_name[512];
+    sprintf(full_name, "%s.%s", sym->function_scope, var_name);
+    return strdup(full_name);
+}
+
 // Helper function to extract identifier name from declarator tree
 static const char* extractIdentifierFromDeclarator(TreeNode* node) {
     if (!node) return NULL;
@@ -201,6 +281,12 @@ char* generate_ir(TreeNode* node) {
             for (int i = 0; i < node->childCount; i++) {
                 generate_ir(node->children[i]);
             }
+            
+            // For static variables, return the full name
+            if (isStaticVariable(node->value)) {
+                return getStaticVarName(node->value);
+            }
+            
             // Return the identifier name itself
             return strdup(node->value);
         }
@@ -228,9 +314,9 @@ char* generate_ir(TreeNode* node) {
             
             TreeNode* declarator = node->children[1];
             if (declarator && declarator->value) {
-                char func_label[140];
-                sprintf(func_label, "FUNC_%s", declarator->value);
-                emit("LABEL", func_label, "", "");
+                // Set current function name for static variable tracking
+                strcpy(current_function_name, declarator->value);
+                
                 emit("FUNC_BEGIN", declarator->value, "", "");
             }
             
@@ -241,6 +327,8 @@ char* generate_ir(TreeNode* node) {
             
             if (declarator && declarator->value) {
                 emit("FUNC_END", declarator->value, "", "");
+                // Clear current function name
+                current_function_name[0] = '\0';
             }
             
             return NULL;
@@ -649,8 +737,13 @@ char* generate_ir(TreeNode* node) {
                 TreeNode* lhs = node->children[0];
                 if (lhs->type == NODE_IDENTIFIER) {
                     // Simple variable assignment: x = rhs
-                    emit("ASSIGN", rhs_result, "", lhs->value);
-                    return lhs->value;
+                    // Use full name for static variables
+                    char* lhs_name = lhs->value;
+                    if (isStaticVariable(lhs_name)) {
+                        lhs_name = getStaticVarName(lhs_name);
+                    }
+                    emit("ASSIGN", rhs_result, "", lhs_name);
+                    return lhs_name;
                 }
                 else if (lhs->type == NODE_POSTFIX_EXPRESSION && strcmp(lhs->value, ".") == 0) {
                     // Struct member assignment: struct.member = rhs
@@ -691,60 +784,90 @@ char* generate_ir(TreeNode* node) {
             }
             else if (strcmp(node->value, "+=") == 0) {
                 char* lhs = node->children[0]->value;
+                if (isStaticVariable(lhs)) {
+                    lhs = getStaticVarName(lhs);
+                }
                 char* rhs = generate_ir(node->children[1]);
                 emit("ADD", lhs, rhs, lhs);
                 return lhs;
             }
             else if (strcmp(node->value, "-=") == 0) {
                 char* lhs = node->children[0]->value;
+                if (isStaticVariable(lhs)) {
+                    lhs = getStaticVarName(lhs);
+                }
                 char* rhs = generate_ir(node->children[1]);
                 emit("SUB", lhs, rhs, lhs);
                 return lhs;
             }
             else if (strcmp(node->value, "*=") == 0) {
                 char* lhs = node->children[0]->value;
+                if (isStaticVariable(lhs)) {
+                    lhs = getStaticVarName(lhs);
+                }
                 char* rhs = generate_ir(node->children[1]);
                 emit("MUL", lhs, rhs, lhs);
                 return lhs;
             }
             else if (strcmp(node->value, "/=") == 0) {
                 char* lhs = node->children[0]->value;
+                if (isStaticVariable(lhs)) {
+                    lhs = getStaticVarName(lhs);
+                }
                 char* rhs = generate_ir(node->children[1]);
                 emit("DIV", lhs, rhs, lhs);
                 return lhs;
             }
             else if (strcmp(node->value, "%=") == 0) {
                 char* lhs = node->children[0]->value;
+                if (isStaticVariable(lhs)) {
+                    lhs = getStaticVarName(lhs);
+                }
                 char* rhs = generate_ir(node->children[1]);
                 emit("MOD", lhs, rhs, lhs);
                 return lhs;
             }
             else if (strcmp(node->value, "&=") == 0) {
                 char* lhs = node->children[0]->value;
+                if (isStaticVariable(lhs)) {
+                    lhs = getStaticVarName(lhs);
+                }
                 char* rhs = generate_ir(node->children[1]);
                 emit("BITAND", lhs, rhs, lhs);
                 return lhs;
             }
             else if (strcmp(node->value, "|=") == 0) {
                 char* lhs = node->children[0]->value;
+                if (isStaticVariable(lhs)) {
+                    lhs = getStaticVarName(lhs);
+                }
                 char* rhs = generate_ir(node->children[1]);
                 emit("BITOR", lhs, rhs, lhs);
                 return lhs;
             }
             else if (strcmp(node->value, "^=") == 0) {
                 char* lhs = node->children[0]->value;
+                if (isStaticVariable(lhs)) {
+                    lhs = getStaticVarName(lhs);
+                }
                 char* rhs = generate_ir(node->children[1]);
                 emit("BITXOR", lhs, rhs, lhs);
                 return lhs;
             }
             else if (strcmp(node->value, "<<=") == 0) {
                 char* lhs = node->children[0]->value;
+                if (isStaticVariable(lhs)) {
+                    lhs = getStaticVarName(lhs);
+                }
                 char* rhs = generate_ir(node->children[1]);
                 emit("LSHIFT", lhs, rhs, lhs);
                 return lhs;
             }
             else if (strcmp(node->value, ">>=") == 0) {
                 char* lhs = node->children[0]->value;
+                if (isStaticVariable(lhs)) {
+                    lhs = getStaticVarName(lhs);
+                }
                 char* rhs = generate_ir(node->children[1]);
                 emit("RSHIFT", lhs, rhs, lhs);
                 return lhs;
@@ -1103,16 +1226,26 @@ char* generate_ir(TreeNode* node) {
             }
             
             if (strcmp(node->value, "++_pre") == 0) {
-                // Pre-increment - optimize to direct increment
+                // Pre-increment - use temp-based pattern: t = var + 1, var = t, return t
                 char* operand = node->children[0]->value;
-                emit("INC", operand, "", operand);  // Direct increment without temp
-                return operand;
+                if (isStaticVariable(operand)) {
+                    operand = getStaticVarName(operand);
+                }
+                char* temp = newTemp();
+                emit("ADD", operand, "1", temp);  // t = var + 1
+                emit("ASSIGN", temp, "", operand);  // var = t
+                return temp;  // Return new value
             }
             else if (strcmp(node->value, "--_pre") == 0) {
-                // Pre-decrement - optimize to direct decrement
+                // Pre-decrement - use temp-based pattern: t = var - 1, var = t, return t
                 char* operand = node->children[0]->value;
-                emit("DEC", operand, "", operand);  // Direct decrement without temp
-                return operand;
+                if (isStaticVariable(operand)) {
+                    operand = getStaticVarName(operand);
+                }
+                char* temp = newTemp();
+                emit("SUB", operand, "1", temp);  // t = var - 1
+                emit("ASSIGN", temp, "", operand);  // var = t
+                return temp;  // Return new value
             }
             else if (strcmp(node->value, "&") == 0) {
                 // Address-of - special handling for array elements
@@ -1268,17 +1401,27 @@ char* generate_ir(TreeNode* node) {
             }
             else if (strcmp(node->value, "++_post") == 0) {
                 char* operand = node->children[0]->value;
-                char* temp = newTemp();
-                emit("ASSIGN", operand, "", temp);  // Save old value
-                emit("INC", operand, "", operand);  // Direct increment
-                return temp;  // Return old value
+                if (isStaticVariable(operand)) {
+                    operand = getStaticVarName(operand);
+                }
+                char* old_val = newTemp();
+                char* new_val = newTemp();
+                emit("ASSIGN", operand, "", old_val);  // old_val = var (save old value)
+                emit("ADD", operand, "1", new_val);    // new_val = var + 1
+                emit("ASSIGN", new_val, "", operand);  // var = new_val
+                return old_val;  // Return old value
             }
             else if (strcmp(node->value, "--_post") == 0) {
                 char* operand = node->children[0]->value;
-                char* temp = newTemp();
-                emit("ASSIGN", operand, "", temp);  // Save old value
-                emit("DEC", operand, "", operand);  // Direct decrement
-                return temp;  // Return old value
+                if (isStaticVariable(operand)) {
+                    operand = getStaticVarName(operand);
+                }
+                char* old_val = newTemp();
+                char* new_val = newTemp();
+                emit("ASSIGN", operand, "", old_val);  // old_val = var (save old value)
+                emit("SUB", operand, "1", new_val);    // new_val = var - 1
+                emit("ASSIGN", new_val, "", operand);  // var = new_val
+                return old_val;  // Return old value
             }
             return NULL;
         }
@@ -1307,6 +1450,31 @@ char* generate_ir(TreeNode* node) {
                 
                 if (!lhs_name) {
                     lhs_name = declarator->value; // fallback
+                }
+                
+                // Check if this is a static variable
+                if (isStaticVariable(lhs_name)) {
+                    // For static variables, register the initialization but don't emit code here
+                    TreeNode* rhs = node->children[1];
+                    
+                    // Get the initialization value
+                    char* init_value = NULL;
+                    if (rhs->childCount == 0 && rhs->value) {
+                        // Simple constant initializer
+                        init_value = rhs->value;
+                    } else if (rhs->childCount > 0) {
+                        // Expression initializer - evaluate it
+                        init_value = generate_ir(rhs);
+                    }
+                    
+                    // Get the full static variable name
+                    char* static_var_name = getStaticVarName(lhs_name);
+                    
+                    // Register the static variable for later initialization
+                    registerStaticVar(static_var_name, init_value ? init_value : "0");
+                    
+                    free(static_var_name);
+                    return lhs_name;
                 }
                 
                 TreeNode* rhs = node->children[1];

@@ -14,6 +14,10 @@ int irCount = 0;
 int tempCount = 0;
 int labelCount = 0;
 
+// Static variable tracking
+StaticVarInfo staticVars[MAX_STATIC_VARS];
+int staticVarCount = 0;
+
 void emit(const char* op, const char* arg1, const char* arg2, const char* result) {
     if (irCount >= MAX_IR_SIZE) {
         cerr << "Error: IR size limit exceeded" << endl;
@@ -36,6 +40,23 @@ char* newLabel() {
     static char label[32];
     sprintf(label, "L%d", labelCount++);
     return strdup(label);
+}
+
+void registerStaticVar(const char* name, const char* init_value) {
+    if (staticVarCount >= MAX_STATIC_VARS) {
+        cerr << "Error: Too many static variables" << endl;
+        return;
+    }
+    
+    strcpy(staticVars[staticVarCount].name, name);
+    if (init_value && strlen(init_value) > 0) {
+        strcpy(staticVars[staticVarCount].init_value, init_value);
+        staticVars[staticVarCount].is_initialized = 1;
+    } else {
+        strcpy(staticVars[staticVarCount].init_value, "0");
+        staticVars[staticVarCount].is_initialized = 0;
+    }
+    staticVarCount++;
 }
 
 string convertToThreeAddress(const Quadruple& quad) {
@@ -225,14 +246,88 @@ void printIR(const char* filename) {
     fp << "# Three-Address Code (Intermediate Representation)" << endl;
     fp << "# ================================================" << endl << endl;
     
+    // First, emit DATA section for static/global variable initializations
+    bool hasGlobalsOrStatics = false;
+    
+    // Check if we have any global variables or static variables
+    for (int i = 0; i < irCount; i++) {
+        if (strcmp(IR[i].op, "ASSIGN") == 0 && strcmp(IR[i].op, "FUNC_BEGIN") != 0) {
+            // Check if this is a global assignment (before any function)
+            bool beforeAnyFunction = true;
+            for (int j = 0; j < i; j++) {
+                if (strcmp(IR[j].op, "FUNC_BEGIN") == 0) {
+                    beforeAnyFunction = false;
+                    break;
+                }
+            }
+            if (beforeAnyFunction) {
+                if (!hasGlobalsOrStatics) {
+                    fp << "DATA:" << endl;
+                    hasGlobalsOrStatics = true;
+                }
+            }
+        }
+    }
+    
+    // Emit static variable initializations in DATA section
+    if (staticVarCount > 0) {
+        if (!hasGlobalsOrStatics) {
+            fp << "DATA:" << endl;
+            hasGlobalsOrStatics = true;
+        }
+        for (int i = 0; i < staticVarCount; i++) {
+            fp << "    " << staticVars[i].name << " = " << staticVars[i].init_value << endl;
+        }
+    }
+    
+    // Emit global variable initializations in DATA section
+    for (int i = 0; i < irCount; i++) {
+        if (strcmp(IR[i].op, "ASSIGN") == 0) {
+            // Check if this is a global assignment (before any function)
+            bool beforeAnyFunction = true;
+            for (int j = 0; j < i; j++) {
+                if (strcmp(IR[j].op, "FUNC_BEGIN") == 0) {
+                    beforeAnyFunction = false;
+                    break;
+                }
+            }
+            if (beforeAnyFunction) {
+                string instruction = convertToThreeAddress(IR[i]);
+                fp << "    " << instruction << endl;
+            }
+        }
+    }
+    
+    if (hasGlobalsOrStatics) {
+        fp << endl;
+    }
+    
+    // Then emit the rest of the IR (functions)
+    bool inFunction = false;
     for (int i = 0; i < irCount; i++) {
         if (strlen(IR[i].op) > 0) {
-            if (strcmp(IR[i].op, "LABEL") == 0) {
-                fp << IR[i].arg1 << ":" << endl;
-            } else if (strcmp(IR[i].op, "FUNC_BEGIN") == 0) {
-                fp << endl << "# Function: " << IR[i].arg1 << endl;
+            if (strcmp(IR[i].op, "FUNC_BEGIN") == 0) {
+                fp << "func_begin " << IR[i].arg1 << endl;
+                inFunction = true;
             } else if (strcmp(IR[i].op, "FUNC_END") == 0) {
-                fp << "# End Function: " << IR[i].arg1 << endl << endl;
+                fp << "func_end " << IR[i].arg1 << endl << endl;
+                inFunction = false;
+            } else if (strcmp(IR[i].op, "LABEL") == 0) {
+                fp << IR[i].arg1 << ":" << endl;
+            } else if (strcmp(IR[i].op, "ASSIGN") == 0) {
+                // Skip global assignments (already handled in DATA section)
+                bool beforeAnyFunction = true;
+                for (int j = 0; j < i; j++) {
+                    if (strcmp(IR[j].op, "FUNC_BEGIN") == 0) {
+                        beforeAnyFunction = false;
+                        break;
+                    }
+                }
+                if (!beforeAnyFunction || inFunction) {
+                    // This is inside a function
+                    string instruction = convertToThreeAddress(IR[i]);
+                    fp << "    " << instruction << endl;
+                }
             } else {
                 // Convert to three-address instruction format
                 string instruction = convertToThreeAddress(IR[i]);
@@ -244,4 +339,7 @@ void printIR(const char* filename) {
     fp.close();
     cout << "\nIntermediate code written to: " << filename << endl;
     cout << "Total IR instructions: " << irCount << endl;
+    if (staticVarCount > 0) {
+        cout << "Static variables: " << staticVarCount << endl;
+    }
 }
