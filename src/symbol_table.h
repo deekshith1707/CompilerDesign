@@ -127,7 +127,7 @@ TypeCheckResult checkUnaryOp(const char* op, TreeNode* operand, char** result_ty
 TypeCheckResult checkAssignment(TreeNode* lhs, TreeNode* rhs);
 TypeCheckResult checkFunctionCall(const char* func_name, TreeNode* args, char** result_type);
 TypeCheckResult checkArrayAccess(TreeNode* array, TreeNode* index, char** result_type);
-TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, char** result_type);
+TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, const char* op, char** result_type);
 
 // Type compatibility functions
 int isArrayType(const char* type);
@@ -143,6 +143,8 @@ int validateBreakContinue(const char* stmt_type);
 int validateReturn(TreeNode* expr, const char* expected_return_type);
 int validateSwitchCase(TreeNode* switch_expr, TreeNode* case_expr);
 int validateGotoLabel(const char* label);
+int isScalarType(const char* type);
+TypeCheckResult validateConditional(TreeNode* expr);
 
 // Storage class validation
 int hasStorageClass(TreeNode* decl_specs, const char* storage_class);
