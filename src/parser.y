@@ -150,6 +150,27 @@ int hasParameterListDescendant(TreeNode* node) {
     return 0;
 }
 
+// Helper function to count array dimensions in a declarator
+// In function parameters, arrays decay to pointers, so each [] adds a pointer level
+int countArrayDimensions(TreeNode* node) {
+    if (!node) return 0;
+    
+    int count = 0;
+    
+    // Check if this node represents an array
+    if (node->type == NODE_DIRECT_DECLARATOR && 
+        (strcmp(node->value, "array") == 0 || strcmp(node->value, "array[]") == 0)) {
+        count = 1;
+    }
+    
+    // Recursively count in all children
+    for (int i = 0; i < node->childCount; i++) {
+        count += countArrayDimensions(node->children[i]);
+    }
+    
+    return count;
+}
+
 // Helper function to build function pointer type string
 void buildFunctionPointerType(char* dest, const char* returnType, TreeNode* declarator) {
     // For now, build a simplified function pointer type
@@ -1155,13 +1176,18 @@ parameter_declaration:
         const char* paramName = extractIdentifierName($2);
         if (paramName && pending_param_count < 32) {
             int ptrLevel = countPointerLevels($2);
+            // In function parameters, arrays decay to pointers
+            // char* argv[] becomes char**, so count array dimensions as additional pointer levels
+            int arrayDims = countArrayDimensions($2);
+            int totalPtrLevel = ptrLevel + arrayDims;
+            
             char fullType[256];
-            buildFullType(fullType, currentType, ptrLevel);
+            buildFullType(fullType, currentType, totalPtrLevel);
             
             // Store parameter info for later insertion (if this is a definition)
             strncpy(pending_params[pending_param_count].name, paramName, 255);
             strncpy(pending_params[pending_param_count].type, fullType, 255);
-            pending_params[pending_param_count].ptrLevel = ptrLevel;
+            pending_params[pending_param_count].ptrLevel = totalPtrLevel;
             pending_param_count++;
         }
     }
