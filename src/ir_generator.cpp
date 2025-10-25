@@ -193,6 +193,20 @@ static char* get_constant_value_from_expression(TreeNode* node) {
         case NODE_BINARY_CONSTANT:
         case NODE_CHAR_CONSTANT:
             return node->value;
+        
+        case NODE_IDENTIFIER: {
+            // Check if this is an enum constant
+            extern Symbol* lookupSymbol(const char* name);
+            Symbol* sym = lookupSymbol(node->value);
+            if (sym && strcmp(sym->kind, "enum_constant") == 0) {
+                // Return the enum constant's value
+                // The symbol table stores the enum value in the offset field
+                static char enum_val_buf[32];
+                sprintf(enum_val_buf, "%d", sym->offset);
+                return enum_val_buf;
+            }
+            return NULL; // Not a constant
+        }
     }
     
     // Recurse down for wrapper nodes
@@ -826,9 +840,27 @@ char* generate_ir(TreeNode* node) {
                         emit("STORE_OFFSET", elem_addr, offset_str, rhs_result);
                         return array;
                     } else {
-                        // Simple struct variable assignment
-                        // Get the actual member type from struct definition to ensure correct conversion
-                        char* struct_var = base->value;
+                        // Simple struct/union variable assignment
+                        // Check if base is a nested member access (e.g., item.value.int_val)
+                        char* struct_var = NULL;
+                        if (base->type == NODE_POSTFIX_EXPRESSION && strcmp(base->value, ".") == 0) {
+                            // Nested member access: build the full path directly
+                            char* base_path;
+                            if (base->children[0]->type == NODE_IDENTIFIER) {
+                                base_path = base->children[0]->value;
+                            } else {
+                                base_path = generate_ir(base->children[0]);
+                            }
+                            char* base_member = base->children[1]->value;
+                            
+                            static char full_path[256];
+                            snprintf(full_path, sizeof(full_path), "%s.%s.%s", base_path, base_member, member);
+                            emit("ASSIGN", rhs_result, "", full_path);
+                            return base_path;
+                        } else {
+                            // Simple identifier base
+                            struct_var = base->value;
+                        }
                         
                         // Look up struct type to get member type
                         extern Symbol* lookupSymbol(const char* name);
@@ -1721,9 +1753,69 @@ char* generate_ir(TreeNode* node) {
                     emit("LOAD_OFFSET", elem_addr, offset_str, temp);
                     return temp;
                 } else {
-                    // Simple struct variable
-                    struct_var = base->value;
+                    // Simple struct/union variable - or nested member access
                     char* member = node->children[1]->value;
+                    
+                    // Check if base is itself a member access (nested, like item.value.int_val)
+                    if (base->type == NODE_POSTFIX_EXPRESSION && strcmp(base->value, ".") == 0) {
+                        // Nested member access: recursively build the full path
+                        // We want to emit "item.value.int_val" not temporaries
+                        char* base_path;
+                        if (base->children[0]->type == NODE_IDENTIFIER) {
+                            base_path = base->children[0]->value;
+                        } else {
+                            base_path = generate_ir(base->children[0]);
+                        }
+                        char* base_member = base->children[1]->value;
+                        
+                        static char full_path[256];
+                        snprintf(full_path, sizeof(full_path), "%s.%s.%s", base_path, base_member, member);
+                        
+                        char* temp = newTemp();
+                        emit("ASSIGN", full_path, "", temp);
+                        
+                        // Try to propagate type for nested access too
+                        // This is complex - for now return temp
+                        return temp;
+                    }
+                    
+                    // Simple identifier base
+                    char* struct_var = base->value;
+                    
+                    // Try to get member type from struct/union definition for type propagation
+                    extern Symbol* lookupSymbol(const char* name);
+                    Symbol* sym = lookupSymbol(struct_var);
+                    if (sym && sym->type) {
+                        // Check if it's a struct
+                        if (strncmp(sym->type, "struct ", 7) == 0) {
+                            const char* struct_name = sym->type + 7;
+                            extern StructDef* lookupStruct(const char* name);
+                            StructDef* struct_def = lookupStruct(struct_name);
+                            if (struct_def) {
+                                for (int i = 0; i < struct_def->member_count; i++) {
+                                    if (strcmp(struct_def->members[i].name, member) == 0) {
+                                        node->dataType = strdup(struct_def->members[i].type);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // Check if it's a union
+                        else if (strncmp(sym->type, "union ", 6) == 0) {
+                            const char* union_name = sym->type + 6;
+                            extern StructDef* lookupUnion(const char* name);
+                            StructDef* union_def = lookupUnion(union_name);
+                            if (union_def) {
+                                for (int i = 0; i < union_def->member_count; i++) {
+                                    if (strcmp(union_def->members[i].name, member) == 0) {
+                                        node->dataType = strdup(union_def->members[i].type);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
                     char* temp = newTemp();
                     emit("LOAD_MEMBER", struct_var, member, temp);
                     return temp;
