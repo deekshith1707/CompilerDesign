@@ -770,39 +770,88 @@ char* generate_ir(TreeNode* node) {
 
         case NODE_LOGICAL_OR_EXPRESSION:
         {
-            // Implement proper short-circuit evaluation
+            // Implement proper short-circuit evaluation with support for nested && expressions
             char* result_temp = newTemp();
             char* true_label = newLabel();
             char* end_label = newLabel();
             
-            // 1. Evaluate left side
-            char* left = generate_ir(node->children[0]);
-            
-            // 2. Short-circuit: if left is true, set result to 1 and skip right
-            const char* leftType = (node->children[0] && node->children[0]->dataType) ? 
-                                  node->children[0]->dataType : "int";
-            emitConditionalJump("IF_TRUE_GOTO", left, true_label, leftType);
-            
-            // 3. Left was false, evaluate right side
-            char* right = generate_ir(node->children[1]);
-            
-            // 4. Set result based on right side
-            const char* rightType = (node->children[1] && node->children[1]->dataType) ? 
-                                   node->children[1]->dataType : "int";
-            emitConditionalJump("IF_TRUE_GOTO", right, true_label, rightType);
-            
-            // 5. Both were false: assign 0
-            emit("ASSIGN", "0", "", result_temp);
-            emit("GOTO", end_label, "", "");
-            
-            // 6. True label: assign 1
-            emit("LABEL", true_label, "", "");
-            emit("ASSIGN", "1", "", result_temp);
-            
-            // 7. End label
-            emit("LABEL", end_label, "", "");
-            
-            return result_temp;
+            // Helper function to generate short-circuit code for left side
+            // If left is a NODE_LOGICAL_AND_EXPRESSION, we need special handling
+            TreeNode* left_node = node->children[0];
+            if (left_node->type == NODE_LOGICAL_AND_EXPRESSION) {
+                // For (A && B) in (A && B) || C:
+                // - Evaluate A
+                // - If A is false, jump to evaluate C (not to false result)
+                // - Evaluate B
+                // - If B is false, jump to evaluate C
+                // - If B is true, jump to true_label
+                
+                char* false_label = newLabel();  // Will evaluate right side (C)
+                
+                // Evaluate A
+                char* a_result = generate_ir(left_node->children[0]);
+                const char* a_type = (left_node->children[0] && left_node->children[0]->dataType) ? 
+                                    left_node->children[0]->dataType : "int";
+                emitConditionalJump("IF_FALSE_GOTO", a_result, false_label, a_type);
+                
+                // Evaluate B
+                char* b_result = generate_ir(left_node->children[1]);
+                const char* b_type = (left_node->children[1] && left_node->children[1]->dataType) ? 
+                                    left_node->children[1]->dataType : "int";
+                emitConditionalJump("IF_FALSE_GOTO", b_result, false_label, b_type);
+                
+                // Both A and B were true, so the OR is true
+                emit("ASSIGN", "1", "", result_temp);
+                emit("GOTO", end_label, "", "");
+                
+                // false_label: A or B was false, evaluate C
+                emit("LABEL", false_label, "", "");
+                char* right = generate_ir(node->children[1]);
+                const char* rightType = (node->children[1] && node->children[1]->dataType) ? 
+                                       node->children[1]->dataType : "int";
+                emitConditionalJump("IF_TRUE_GOTO", right, true_label, rightType);
+                
+                // C was also false
+                emit("ASSIGN", "0", "", result_temp);
+                emit("GOTO", end_label, "", "");
+                
+                // true_label: C was true
+                emit("LABEL", true_label, "", "");
+                emit("ASSIGN", "1", "", result_temp);
+                
+                emit("LABEL", end_label, "", "");
+                return result_temp;
+            } else {
+                // Standard OR evaluation when left is not an AND expression
+                // 1. Evaluate left side
+                char* left = generate_ir(left_node);
+                
+                // 2. Short-circuit: if left is true, set result to 1 and skip right
+                const char* leftType = (left_node && left_node->dataType) ? 
+                                      left_node->dataType : "int";
+                emitConditionalJump("IF_TRUE_GOTO", left, true_label, leftType);
+                
+                // 3. Left was false, evaluate right side
+                char* right = generate_ir(node->children[1]);
+                
+                // 4. Set result based on right side
+                const char* rightType = (node->children[1] && node->children[1]->dataType) ? 
+                                       node->children[1]->dataType : "int";
+                emitConditionalJump("IF_TRUE_GOTO", right, true_label, rightType);
+                
+                // 5. Both were false: assign 0
+                emit("ASSIGN", "0", "", result_temp);
+                emit("GOTO", end_label, "", "");
+                
+                // 6. True label: assign 1
+                emit("LABEL", true_label, "", "");
+                emit("ASSIGN", "1", "", result_temp);
+                
+                // 7. End label
+                emit("LABEL", end_label, "", "");
+                
+                return result_temp;
+            }
         }
 
         case NODE_LOGICAL_AND_EXPRESSION:
