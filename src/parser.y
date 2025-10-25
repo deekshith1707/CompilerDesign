@@ -42,6 +42,8 @@ TreeNode* ast_root = NULL;
 extern int yylex();
 void yyerror(const char* msg);
 void semantic_error(const char* msg);
+int isFunctionDeclarator(TreeNode* node);
+int hasParameterListDescendant(TreeNode* node);
 
 // Helper function to check if a node is an lvalue
 int isLValue(TreeNode* node) {
@@ -95,6 +97,54 @@ const char* extractIdentifierName(TreeNode* node) {
         if (name) return name;
     }
     return NULL;
+}
+
+// Helper function to check if a declarator represents a function pointer
+int isFunctionPointer(TreeNode* node) {
+    if (!node) return 0;
+    
+    // Function pointer pattern: MULTIPLY -> (eventual) parameter_type_list
+    // Check if this node is a pointer
+    if (node->type == NODE_POINTER) {
+        // Check if any descendant has a parameter list (indicating function pointer)
+        return hasParameterListDescendant(node);
+    }
+    
+    // Also check children recursively
+    for (int i = 0; i < node->childCount; i++) {
+        if (isFunctionPointer(node->children[i])) {
+            return 1;
+        }
+    }
+    
+    return 0;
+}
+
+// Helper function to check if a node has a parameter list descendant
+int hasParameterListDescendant(TreeNode* node) {
+    if (!node) return 0;
+    
+    // Check if this node is a parameter list
+    if (node->type == NODE_PARAMETER_LIST) {
+        return 1;
+    }
+    
+    // Recursively check all children
+    for (int i = 0; i < node->childCount; i++) {
+        if (hasParameterListDescendant(node->children[i])) {
+            return 1;
+        }
+    }
+    
+    return 0;
+}
+
+// Helper function to build function pointer type string
+void buildFunctionPointerType(char* dest, const char* returnType, TreeNode* declarator) {
+    // For now, build a simplified function pointer type
+    // Format: "returnType (*)(param_types...)"
+    strcpy(dest, returnType);
+    strcat(dest, " (*)()");  // Simplified - would need to extract parameter types
 }
 
 // Helper function to extract type from declaration_specifiers
@@ -810,9 +860,12 @@ init_declarator_list:
 init_declarator:
     declarator {
         const char* varName = extractIdentifierName($1);
-        // Skip insertion for function declarators (pending_param_count > 0 means we just parsed parameters)
-        if (varName && pending_param_count == 0) {
-            int ptrLevel = countPointerLevels($1);
+        // Skip insertion for function declarators, but not for function pointers
+        // Function pointers have parameters AND a pointer level > 0
+        int ptrLevel = countPointerLevels($1);
+        int isFuncPtr = isFunctionPointer($1) || (ptrLevel > 0 && pending_param_count > 0);
+        
+        if (varName && (pending_param_count == 0 || isFuncPtr)) {
             int isArray = hasArrayBrackets($1);
             int arrayDims[10] = {0};
             int numDims = 0;
@@ -828,7 +881,12 @@ init_declarator:
             }
             
             char fullType[256];
-            buildFullType(fullType, currentType, ptrLevel);
+            if (isFuncPtr) {
+                // Build function pointer type
+                buildFunctionPointerType(fullType, currentType, $1);
+            } else {
+                buildFullType(fullType, currentType, ptrLevel);
+            }
             
             if (in_typedef) {
                 // Insert the symbol and then manually set its kind to "typedef".
@@ -837,8 +895,20 @@ init_declarator:
                     strcpy(symtab[symCount - 1].kind, "typedef");
                 }
             } else {
-                // Always insert to avoid cascading errors
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+                // Only insert if no errors occurred
+                if (error_count == semantic_error_count) {
+                    insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+                    // Mark as function pointer if needed
+                    if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
+                        strcpy(symtab[symCount - 1].kind, "function_pointer");
+                    }
+                }
+                semantic_error_count = error_count;
+                
+                // Reset pending parameters for function pointers (they don't define functions)
+                if (isFuncPtr) {
+                    pending_param_count = 0;
+                }
             }
         }
         $$ = $1;
@@ -851,6 +921,7 @@ init_declarator:
             int arrayDims[10] = {0};
             int numDims = 0;
             int hasEmptyBrackets = hasEmptyArrayBrackets($1);
+            int isFuncPtr = isFunctionPointer($1) || (ptrLevel > 0 && pending_param_count > 0);
             
             if (isArray) {
                 numDims = extractArrayDimensions($1, arrayDims, 10);
@@ -888,10 +959,29 @@ init_declarator:
             }
             
             char fullType[256];
-            buildFullType(fullType, currentType, ptrLevel);
+            if (isFuncPtr) {
+                // Build function pointer type
+                buildFunctionPointerType(fullType, currentType, $1);
+            } else {
+                buildFullType(fullType, currentType, ptrLevel);
+            }
             
+            // Type check initialization for function pointers
+            if (isFuncPtr && $3->dataType) {
+                // Function pointer initialization: check if initializer is a function
+                // For now, allow initialization of function pointers with identifiers
+                // This will need more sophisticated checking in a complete implementation
+                if ($3->type == NODE_IDENTIFIER) {
+                    // Check if the identifier is a function
+                    Symbol* sym = lookupSymbol($3->value);
+                    if (!sym || !sym->is_function) {
+                        // Don't error here - might be a valid function name
+                        // The error will be caught later if it's truly invalid
+                    }
+                }
+            }
             // Type check initialization: check if trying to initialize scalar with array
-            if (!isArray && ptrLevel == 0 && $3->dataType && isArrayType($3->dataType)) {
+            else if (!isArray && ptrLevel == 0 && $3->dataType && isArrayType($3->dataType)) {
                 // Trying to initialize non-pointer scalar with array
                 char* base_type = getArrayBaseType($3->dataType);
                 if (base_type) {
@@ -901,8 +991,8 @@ init_declarator:
                 }
             }
             
-            // Type check initialization: pointer = non-zero integer (error)
-            if (ptrLevel > 0 && $3->dataType && !isNullPointer($3)) {
+            // Type check initialization: pointer = non-zero integer (error) - but not for function pointers
+            else if (!isFuncPtr && ptrLevel > 0 && $3->dataType && !isNullPointer($3)) {
                 char* init_decayed = decayArrayToPointer($3->dataType);
                 // If initializer is not a pointer and not NULL, it's an error
                 if (!strstr(init_decayed, "*") && !isArithmeticType(init_decayed)) {
@@ -925,12 +1015,18 @@ init_declarator:
             }
             
             // Only insert if no errors occurred
-            // Always insert to avoid cascading errors
-            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+            
+            // Only insert if no errors occurred
+            if (error_count == semantic_error_count) {
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+                // Mark as function pointer if needed
+                if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
+                    strcpy(symtab[symCount - 1].kind, "function_pointer");
+                }
+            }
+            semantic_error_count = error_count;
             /* emit("ASSIGN", ...) REMOVED */
-        }
-        
-        // Create an AST node for the initialization
+        }        // Create an AST node for the initialization
         $$ = createNode(NODE_INITIALIZER, "=");
         addChild($$, $1); // The declarator (ID)
         addChild($$, $3); // The initializer (expression)
@@ -1058,8 +1154,14 @@ parameter_declaration:
         $$ = createNode(NODE_PARAMETER_DECLARATION, "param");
         addChild($$, $1);
         addChild($$, $2);
+        // Also count parameters without names (for function pointers)
+        pending_param_count++;
     }
-    | declaration_specifiers { $$ = $1; }
+    | declaration_specifiers { 
+        $$ = $1;
+        // Also count parameters with just type (for function pointers)
+        pending_param_count++;
+    }
     ;
 
 abstract_declarator:
@@ -1158,6 +1260,7 @@ block_item_list:
 block_item:
     declaration { $$ = $1; }
     | statement { $$ = $1; }
+    | function_definition { $$ = $1; }
     ;
 
 expression_statement:
@@ -1284,31 +1387,24 @@ iteration_statement:
             recovering_from_error = 0;
         }
     | FOR LPAREN
-        {
-            // C99: Variables declared in for loop init are scoped to the loop
-            enterScope();
-        }
-        declaration                           // $4: init (C99 style variable declaration)
-        for_label_marker                      // $5: marker
-        expression_statement                  // $6: cond
+        declaration                           // $3: init (C99 style variable declaration)
+        for_label_marker                      // $4: marker
+        expression_statement                  // $5: cond
         { 
             /* emit("IF_FALSE_GOTO", ...) REMOVED */
         }
-        for_increment_expression              // $8: incr (can be empty)
-        RPAREN                                // $9
-        statement                             // $10: body
+        for_increment_expression              // $7: incr (can be empty)
+        RPAREN                                // $8
+        statement                             // $9: body
         {
             /* All emit and popLoopLabels logic REMOVED */
             $$ = createNode(NODE_ITERATION_STATEMENT, "for");
-            addChild($$, $4);  // init (declaration)
-            addChild($$, $6);  // cond
-            if ($8) addChild($$, $8);  // incr (only if present)
-            addChild($$, $10);  // statement body
-            addChild($$, $5);  // Add the marker node
+            addChild($$, $3);  // init (declaration)
+            addChild($$, $5);  // cond
+            if ($7) addChild($$, $7);  // incr (only if present)
+            addChild($$, $9);  // statement body
+            addChild($$, $4);  // Add the marker node
             recovering_from_error = 0;
-            
-            // Exit the for loop scope
-            exitScope();
         }
     ;
 
@@ -1688,7 +1784,21 @@ cast_expression:
         $$ = createNode(NODE_CAST_EXPRESSION, "cast");
         addChild($$, $2); // The type_name
         addChild($$, $4); // The expression being cast
-        $$->dataType = strdup(currentType); // Type was set when $2 was parsed
+        
+        // Extract the cast type from the type_name node
+        char cast_type[256];
+        strcpy(cast_type, currentType);
+        
+        // Check if abstract_declarator adds pointer levels
+        if ($2->childCount > 1) {
+            TreeNode* abs_decl = $2->children[1];
+            int ptr_levels = countPointerLevels(abs_decl);
+            for (int i = 0; i < ptr_levels; i++) {
+                strcat(cast_type, " *");
+            }
+        }
+        
+        $$->dataType = strdup(cast_type);
     }
     ;
 
@@ -1813,9 +1923,9 @@ postfix_expression:
         Symbol* sym = lookupSymbol($1->value);
         if (!sym) {
             insertExternalFunction($1->value, "int");
-        } else if (!sym->is_function) {
+        } else if (!sym->is_function && strcmp(sym->kind, "function_pointer") != 0) {
             char err_msg[256];
-            sprintf(err_msg, "Called object '%s' is not a function", $1->value);
+            sprintf(err_msg, "Called object '%s' is not a function or function pointer", $1->value);
             yyerror(err_msg);
         }
 
