@@ -917,6 +917,16 @@ init_declarator:
         int isFuncPtr = isFunctionPointer($1) || (ptrLevel > 0 && pending_param_count > 0);
         
         if (varName && (pending_param_count == 0 || isFuncPtr)) {
+            // FIX 2: Check for conflicting storage class on redeclaration/shadowing
+            Symbol* existing = lookupSymbol(varName);
+            if (existing && existing->scope_level != current_scope) {
+                // This is shadowing (declaring in inner scope)
+                // Check if storage classes conflict
+                if (existing->is_static != is_static) {
+                    type_error(yylineno, "Conflicting storage class for re-declaration of '%s'", varName);
+                }
+            }
+            
             int isArray = hasArrayBrackets($1);
             int arrayDims[10] = {0};
             int numDims = 0;
@@ -967,6 +977,21 @@ init_declarator:
     | declarator ASSIGN initializer {
         const char* varName = extractIdentifierName($1);
         if (varName && !in_typedef) {
+            // FIX 2: Check for conflicting storage class on redeclaration/shadowing
+            Symbol* existing = lookupSymbol(varName);
+            if (existing && existing->scope_level != current_scope) {
+                // This is shadowing (declaring in inner scope)
+                // Check if storage classes conflict
+                if (existing->is_static != is_static) {
+                    type_error(yylineno, "Conflicting storage class for re-declaration of '%s'", varName);
+                }
+            }
+            
+            // FIX 3: Check for non-constant initializer on static variable
+            if (is_static && !isConstantExpression($3)) {
+                type_error(yylineno, "Initializer for static storage must be constant");
+            }
+            
             int ptrLevel = countPointerLevels($1);
             int isArray = hasArrayBrackets($1);
             int arrayDims[10] = {0};
@@ -1179,6 +1204,11 @@ parameter_list:
 
 parameter_declaration:
     declaration_specifiers declarator {
+        // FIX 1: Check for illegal 'static' storage class on function parameters
+        if (hasStorageClass($1, "static")) {
+            type_error(yylineno, "Illegal storage class 'static' on function parameter");
+        }
+        
         // Store parameter information instead of inserting it immediately
         // This allows us to differentiate between function declarations and definitions
         $$ = createNode(NODE_PARAMETER_DECLARATION, "param");
@@ -1205,6 +1235,11 @@ parameter_declaration:
         }
     }
     | declaration_specifiers abstract_declarator {
+        // FIX 1: Check for illegal 'static' storage class on function parameters
+        if (hasStorageClass($1, "static")) {
+            type_error(yylineno, "Illegal storage class 'static' on function parameter");
+        }
+        
         $$ = createNode(NODE_PARAMETER_DECLARATION, "param");
         addChild($$, $1);
         addChild($$, $2);
@@ -1212,6 +1247,11 @@ parameter_declaration:
         pending_param_count++;
     }
     | declaration_specifiers { 
+        // FIX 1: Check for illegal 'static' storage class on function parameters
+        if (hasStorageClass($1, "static")) {
+            type_error(yylineno, "Illegal storage class 'static' on function parameter");
+        }
+        
         $$ = $1;
         // Also count parameters with just type (for function pointers)
         pending_param_count++;
