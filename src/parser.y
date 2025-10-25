@@ -1375,6 +1375,12 @@ if_header:
         if ($3 && $3->dataType && strcmp($3->dataType, "void") == 0) {
             type_error(yylineno, "void value not ignored as it ought to be");
         }
+        
+        // ERROR 5: Validate that condition is scalar type
+        if ($3) {
+            validateConditional($3);
+        }
+        
         $$ = $3; // Pass the expression node up
         /* All label and emit logic is REMOVED */
     }
@@ -1442,6 +1448,12 @@ do_trailer:
         if ($3 && $3->dataType && strcmp($3->dataType, "void") == 0) {
             type_error(yylineno, "void value not ignored as it ought to be");
         }
+        
+        // ERROR 5: Validate that condition is scalar type
+        if ($3) {
+            validateConditional($3);
+        }
+        
         $$ = createNode(NODE_ITERATION_STATEMENT, "do_while");
         addChild($$, $3); // expression
     }
@@ -1451,6 +1463,12 @@ do_trailer:
         if ($3 && $3->dataType && strcmp($3->dataType, "void") == 0) {
             type_error(yylineno, "void value not ignored as it ought to be");
         }
+        
+        // ERROR 5: Validate that condition is scalar type
+        if ($3) {
+            validateConditional($3);
+        }
+        
         $$ = createNode(NODE_ITERATION_STATEMENT, "do_until");
         addChild($$, $3); // expression
     }
@@ -1464,6 +1482,12 @@ iteration_statement:
         if ($4 && $4->dataType && strcmp($4->dataType, "void") == 0) {
             type_error(yylineno, "void value not ignored as it ought to be");
         }
+        
+        // ERROR 5: Validate that condition is scalar type
+        if ($4) {
+            validateConditional($4);
+        }
+        
         loop_depth++;  // Enter loop context
     }
     statement
@@ -1496,6 +1520,9 @@ iteration_statement:
                 if (cond->dataType && strcmp(cond->dataType, "void") == 0) {
                     type_error(yylineno, "void value not ignored as it ought to be");
                 }
+                
+                // ERROR 5: Validate that condition is scalar type
+                validateConditional(cond);
             }
             loop_depth++;  // Enter loop context
         }
@@ -1529,6 +1556,9 @@ iteration_statement:
                 if (cond->dataType && strcmp(cond->dataType, "void") == 0) {
                     type_error(yylineno, "void value not ignored as it ought to be");
                 }
+                
+                // ERROR 5: Validate that condition is scalar type
+                validateConditional(cond);
             }
             loop_depth++;  // Enter loop context
         }
@@ -2101,22 +2131,26 @@ postfix_expression:
         $$->dataType = result_type;
     }
     | postfix_expression DOT IDENTIFIER {
-        /* newTemp(), emit("MEMBER_ACCESS") REMOVED */
+        // Enhanced struct member access type checking
+        char* result_type = NULL;
+        TypeCheckResult result = checkMemberAccess($1, $3->value, ".", &result_type);
+        
         $$ = createNode(NODE_POSTFIX_EXPRESSION, ".");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int"); // Simplistic
+        $$->dataType = result_type;
         $$->isLValue = 1;
-        /* $$->tacResult = ... REMOVED */
     }
     | postfix_expression ARROW IDENTIFIER {
-        /* newTemp(), emit("ARROW_ACCESS") REMOVED */
+        // Enhanced pointer-to-struct member access type checking
+        char* result_type = NULL;
+        TypeCheckResult result = checkMemberAccess($1, $3->value, "->", &result_type);
+        
         $$ = createNode(NODE_POSTFIX_EXPRESSION, "->");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int"); // Simplistic
+        $$->dataType = result_type;
         $$->isLValue = 1;
-        /* $$->tacResult = ... REMOVED */
     }
     | postfix_expression INCREMENT {
         if (!isLValue($1)) {
