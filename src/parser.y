@@ -64,6 +64,13 @@ int hasArrayBrackets(TreeNode* node);
 // Helper function to check if a node is an lvalue
 int isLValue(TreeNode* node) {
     if (!node) return 0;
+    
+    // ERROR B: Check if this is a typedef name being used as lvalue
+    if (node->type == NODE_TYPE_NAME) {
+        // TYPE_NAME nodes represent typedef names - they are NOT lvalues
+        return 0;
+    }
+    
     // Variables, array accesses, and dereferenced pointers are lvalues
     if (node->type == NODE_IDENTIFIER) return 1;
     if (node->isLValue) return 1;
@@ -106,6 +113,8 @@ void buildFullType(char* dest, const char* baseType, int ptrLevel) {
 const char* extractIdentifierName(TreeNode* node) {
     if (!node) return NULL;
     if (node->type == NODE_IDENTIFIER) return node->value;
+    // Also check for TYPE_NAME since we allow typedefs in declarator position
+    if (node->type == NODE_TYPE_NAME) return node->value;
     
     // Traverse through pointers and other declarator constructs
     for (int i = 0; i < node->childCount; i++) {
@@ -187,11 +196,19 @@ void buildFunctionPointerType(char* dest, const char* returnType, TreeNode* decl
 // Helper function to extract type from declaration_specifiers
 const char* extractTypeFromSpecifiers(TreeNode* node) {
     if (!node) return NULL;
+    
+    // Check if this is a TYPE_NAME node (typedef name)
+    if (node->type == NODE_TYPE_NAME && node->value) {
+        return node->value;
+    }
+    
+    // Check for built-in type names
     if (node->value && (strstr(node->value, "int") || strstr(node->value, "char") || 
                         strstr(node->value, "float") || strstr(node->value, "double") ||
                         strstr(node->value, "struct"))) {
         return node->value;
     }
+    
     for (int i = 0; i < node->childCount; i++) {
         const char* type = extractTypeFromSpecifiers(node->children[i]);
         if (type) return type;
@@ -244,6 +261,10 @@ void processStructDeclaration(TreeNode* declNode, StructMember* members, int* me
         const char* memberType = extractTypeFromSpecifiers(specifiers);
         
         if (memberType) {
+            // DON'T resolve typedef here - it may not be available yet
+            // Typedef resolution will happen at member access time
+            const char* actual_type = memberType;
+            
             // Second child: struct_declarator_list (the names)
             TreeNode* declaratorList = declNode->children[1];
             
@@ -263,7 +284,7 @@ void processStructDeclaration(TreeNode* declNode, StructMember* members, int* me
                     int dims[10] = {0};
                     int numDims = extractArrayDimensions(declaratorList, dims, 10);
                     // Build type like "char[20]" or "int[10][20]"
-                    strcpy(fullType, memberType);
+                    strcpy(fullType, actual_type);
                     for (int d = 0; d < numDims; d++) {
                         char dimStr[32];
                         sprintf(dimStr, "[%d]", dims[d]);
@@ -271,7 +292,17 @@ void processStructDeclaration(TreeNode* declNode, StructMember* members, int* me
                     }
                     strncpy(members[*memberCount].type, fullType, 127);
                 } else {
-                    strncpy(members[*memberCount].type, memberType, 127);
+                    // Check for pointer level in declarator
+                    int ptrLevel = countPointerLevels(declaratorList);
+                    if (ptrLevel > 0) {
+                        strcpy(fullType, actual_type);
+                        for (int p = 0; p < ptrLevel; p++) {
+                            strcat(fullType, "*");
+                        }
+                        strncpy(members[*memberCount].type, fullType, 127);
+                    } else {
+                        strncpy(members[*memberCount].type, actual_type, 127);
+                    }
                 }
                 members[*memberCount].type[127] = '\0';
                 (*memberCount)++;
@@ -297,7 +328,7 @@ void processStructDeclaration(TreeNode* declNode, StructMember* members, int* me
                             int dims[10] = {0};
                             int numDims = extractArrayDimensions(declarator, dims, 10);
                             // Build type like "char[20]" or "int[10][20]"
-                            strcpy(fullType, memberType);
+                            strcpy(fullType, actual_type);
                             for (int d = 0; d < numDims; d++) {
                                 char dimStr[32];
                                 sprintf(dimStr, "[%d]", dims[d]);
@@ -305,7 +336,17 @@ void processStructDeclaration(TreeNode* declNode, StructMember* members, int* me
                             }
                             strncpy(members[*memberCount].type, fullType, 127);
                         } else {
-                            strncpy(members[*memberCount].type, memberType, 127);
+                            // Check for pointer level in declarator
+                            int ptrLevel = countPointerLevels(declarator);
+                            if (ptrLevel > 0) {
+                                strcpy(fullType, actual_type);
+                                for (int p = 0; p < ptrLevel; p++) {
+                                    strcat(fullType, "*");
+                                }
+                                strncpy(members[*memberCount].type, fullType, 127);
+                            } else {
+                                strncpy(members[*memberCount].type, actual_type, 127);
+                            }
                         }
                         members[*memberCount].type[127] = '\0';
                         (*memberCount)++;
@@ -714,6 +755,11 @@ function_definition:
 
 declaration:
     declaration_specifiers SEMICOLON {
+        // ERROR C: Check for typedef with missing declarator
+        if (in_typedef) {
+            type_error(yylineno, "typedef declaration does not declare anything");
+        }
+        
         $$ = createNode(NODE_DECLARATION, "declaration");
         addChild($$, $1);
         in_typedef = 0;
@@ -999,6 +1045,19 @@ init_declarator:
         int isFuncPtr = isFunctionPointer($1) || (ptrLevel > 0 && pending_param_count > 0);
         
         if (varName && (pending_param_count == 0 || isFuncPtr)) {
+            // ERROR A: Check for redeclaration of typedef name as variable
+            if (!in_typedef) {
+                // Check if varName is already a typedef in current or outer scope
+                for (int i = symCount - 1; i >= 0; i--) {
+                    if (strcmp(symtab[i].name, varName) == 0) {
+                        if (strcmp(symtab[i].kind, "typedef") == 0) {
+                            type_error(yylineno, "redeclaration of '%s' as different kind of symbol (was typedef)", varName);
+                            break;
+                        }
+                    }
+                }
+            }
+            
             // FIX 2: Check for conflicting storage class on redeclaration/shadowing
             Symbol* existing = lookupSymbol(varName);
             if (existing && existing->scope_level != current_scope) {
@@ -1059,6 +1118,17 @@ init_declarator:
     | declarator ASSIGN initializer {
         const char* varName = extractIdentifierName($1);
         if (varName && !in_typedef) {
+            // ERROR A: Check for redeclaration of typedef name as variable
+            // Check if varName is already a typedef in current or outer scope
+            for (int i = symCount - 1; i >= 0; i--) {
+                if (strcmp(symtab[i].name, varName) == 0) {
+                    if (strcmp(symtab[i].kind, "typedef") == 0) {
+                        type_error(yylineno, "redeclaration of '%s' as different kind of symbol (was typedef)", varName);
+                        break;
+                    }
+                }
+            }
+            
             // FIX 2: Check for conflicting storage class on redeclaration/shadowing
             Symbol* existing = lookupSymbol(varName);
             if (existing && existing->scope_level != current_scope) {
@@ -1224,6 +1294,11 @@ declarator:
 
 direct_declarator:
     IDENTIFIER { $$ = $1; }
+    | TYPE_NAME { 
+        // Allow TYPE_NAME in declarator position for better error messages
+        // The semantic analyzer will catch if this is a redeclaration
+        $$ = $1; 
+    }
     | LPAREN declarator RPAREN { $$ = $2; }
     | direct_declarator LBRACKET RBRACKET { 
         $$ = createNode(NODE_DIRECT_DECLARATOR, "array[]");
@@ -2286,6 +2361,16 @@ primary_expression:
                 $$->isLValue = 1; // Assume lvalue
             }
             /* $$->tacResult = ... REMOVED */
+        }
+    }
+    | TYPE_NAME {
+        // Allow TYPE_NAME in expression context so we can catch misuse
+        // (e.g., typedef name used with ++ operator)
+        $$ = $1;
+        // TYPE_NAME is never an lvalue - it's a type, not a variable
+        $$->isLValue = 0;
+        if ($1 && $1->value) {
+            $$->dataType = strdup($1->value);
         }
     }
     | INTEGER_CONSTANT {
