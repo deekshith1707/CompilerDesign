@@ -206,6 +206,38 @@ int getTypeSize(const char* type) {
         return getUnionSize(type);
     }
     
+    // Check if it's an array type like "char[20]" or "int[10][20]"
+    const char* bracket = strchr(type, '[');
+    if (bracket) {
+        // Extract base type (everything before '[')
+        char baseType[128];
+        int baseLen = bracket - type;
+        strncpy(baseType, type, baseLen);
+        baseType[baseLen] = '\0';
+        
+        // Get base type size
+        int baseSize = getTypeSize(baseType);
+        
+        // Calculate total size by multiplying all dimensions
+        int totalSize = baseSize;
+        const char* p = bracket;
+        while (*p) {
+            if (*p == '[') {
+                p++;  // Skip '['
+                int dim = atoi(p);
+                if (dim > 0) {
+                    totalSize *= dim;
+                }
+                // Skip to next '[' or end
+                while (*p && *p != '[' && *p != ']') p++;
+                if (*p == ']') p++;
+            } else {
+                p++;
+            }
+        }
+        return totalSize;
+    }
+    
     // Check if it's a typedef - resolve to underlying type
     for (int i = 0; i < symCount; i++) {
         if (strcmp(symtab[i].name, type) == 0 && strcmp(symtab[i].kind, "typedef") == 0) {

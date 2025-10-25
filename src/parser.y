@@ -16,6 +16,7 @@ int error_count = 0;
 int semantic_error_count = 0;
 static int anonymous_union_counter = 0;
 static int anonymous_struct_counter = 0;
+static int current_enum_value = 0;  // Track current enum constant value
 int recovering_from_error = 0;
 int in_typedef = 0;
 int is_static = 0;  // Flag to track if current declaration is static
@@ -57,6 +58,8 @@ void yyerror(const char* msg);
 void semantic_error(const char* msg);
 int isFunctionDeclarator(TreeNode* node);
 int hasParameterListDescendant(TreeNode* node);
+int extractArrayDimensions(TreeNode* node, int* dims, int maxDims);
+int hasArrayBrackets(TreeNode* node);
 
 // Helper function to check if a node is an lvalue
 int isLValue(TreeNode* node) {
@@ -199,6 +202,35 @@ const char* extractTypeFromSpecifiers(TreeNode* node) {
 // Forward declaration for struct member processing
 void processStructDeclaration(TreeNode* declNode, StructMember* members, int* memberCount, int maxMembers);
 
+// Helper function to evaluate simple constant expressions for enum values
+int evaluateConstantExpression(TreeNode* expr) {
+    if (!expr) return 0;
+    
+    // Handle integer constants
+    if (expr->type == NODE_INTEGER_CONSTANT || expr->type == NODE_CONSTANT) {
+        if (expr->value) {
+            return atoi(expr->value);
+        }
+    }
+    
+    // Handle hex constants
+    if (expr->type == NODE_HEX_CONSTANT && expr->value) {
+        return (int)strtol(expr->value, NULL, 16);
+    }
+    
+    // Handle octal constants
+    if (expr->type == NODE_OCTAL_CONSTANT && expr->value) {
+        return (int)strtol(expr->value, NULL, 8);
+    }
+    
+    // If it's a wrapper node with one child, recurse
+    if (expr->childCount == 1) {
+        return evaluateConstantExpression(expr->children[0]);
+    }
+    
+    return 0;
+}
+
 // Helper to recursively process struct declarations
 void processStructDeclaration(TreeNode* declNode, StructMember* members, int* memberCount, int maxMembers) {
     if (!declNode || *memberCount >= maxMembers) return;
@@ -215,28 +247,69 @@ void processStructDeclaration(TreeNode* declNode, StructMember* members, int* me
             // Second child: struct_declarator_list (the names)
             TreeNode* declaratorList = declNode->children[1];
             
-            // Extract all declarators in this list
-            for (int j = 0; j < declaratorList->childCount && *memberCount < maxMembers; j++) {
-                TreeNode* declarator = declaratorList->children[j];
-                const char* memberName = extractIdentifierName(declarator);
-                if (memberName) {
-                    strncpy(members[*memberCount].name, memberName, 127);
-                    members[*memberCount].name[127] = '\0';
+            // struct_declarator_list can be:
+            // 1. A single declarator (IDENTIFIER or array/pointer declarator)
+            // 2. Multiple declarators (first one + children are additional ones)
+            
+            // First, process the primary declarator (the node itself)
+            const char* memberName = extractIdentifierName(declaratorList);
+            if (memberName && *memberCount < maxMembers) {
+                strncpy(members[*memberCount].name, memberName, 127);
+                members[*memberCount].name[127] = '\0';
+                
+                // Check if it's an array and build the full type with dimensions
+                char fullType[128];
+                if (hasArrayBrackets(declaratorList)) {
+                    int dims[10] = {0};
+                    int numDims = extractArrayDimensions(declaratorList, dims, 10);
+                    // Build type like "char[20]" or "int[10][20]"
+                    strcpy(fullType, memberType);
+                    for (int d = 0; d < numDims; d++) {
+                        char dimStr[32];
+                        sprintf(dimStr, "[%d]", dims[d]);
+                        strcat(fullType, dimStr);
+                    }
+                    strncpy(members[*memberCount].type, fullType, 127);
+                } else {
                     strncpy(members[*memberCount].type, memberType, 127);
-                    members[*memberCount].type[127] = '\0';
-                    (*memberCount)++;
                 }
+                members[*memberCount].type[127] = '\0';
+                (*memberCount)++;
             }
             
-            // If declaratorList has no children but has a name itself, it's a single declarator
-            if (declaratorList->childCount == 0) {
-                const char* memberName = extractIdentifierName(declaratorList);
-                if (memberName && *memberCount < maxMembers) {
-                    strncpy(members[*memberCount].name, memberName, 127);
-                    members[*memberCount].name[127] = '\0';
-                    strncpy(members[*memberCount].type, memberType, 127);
-                    members[*memberCount].type[127] = '\0';
-                    (*memberCount)++;
+            // Then, process any additional declarators in the list (siblings)
+            // But NOT if this is an array/pointer declarator (those children are part of the declarator structure)
+            int isComplexDeclarator = (declaratorList->type == NODE_DIRECT_DECLARATOR && 
+                                      declaratorList->value && strcmp(declaratorList->value, "array") == 0) ||
+                                     (declaratorList->type == NODE_POINTER);
+            
+            if (!isComplexDeclarator) {
+                for (int j = 0; j < declaratorList->childCount && *memberCount < maxMembers; j++) {
+                    TreeNode* declarator = declaratorList->children[j];
+                    const char* additionalName = extractIdentifierName(declarator);
+                    if (additionalName) {
+                        strncpy(members[*memberCount].name, additionalName, 127);
+                        members[*memberCount].name[127] = '\0';
+                        
+                        // Check if it's an array and build the full type with dimensions
+                        char fullType[128];
+                        if (hasArrayBrackets(declarator)) {
+                            int dims[10] = {0};
+                            int numDims = extractArrayDimensions(declarator, dims, 10);
+                            // Build type like "char[20]" or "int[10][20]"
+                            strcpy(fullType, memberType);
+                            for (int d = 0; d < numDims; d++) {
+                                char dimStr[32];
+                                sprintf(dimStr, "[%d]", dims[d]);
+                                strcat(fullType, dimStr);
+                            }
+                            strncpy(members[*memberCount].type, fullType, 127);
+                        } else {
+                            strncpy(members[*memberCount].type, memberType, 127);
+                        }
+                        members[*memberCount].type[127] = '\0';
+                        (*memberCount)++;
+                    }
                 }
             }
         }
@@ -851,6 +924,7 @@ struct_declarator:
 enum_specifier:
     ENUM LBRACE enumerator_list RBRACE {
         setCurrentType("enum");
+        current_enum_value = 0;  // Reset enum counter
         $$ = createNode(NODE_ENUM_SPECIFIER, "enum");
         addChild($$, $3);
     }
@@ -861,6 +935,7 @@ enum_specifier:
     }
     | ENUM IDENTIFIER LBRACE enumerator_list RBRACE {
         setCurrentType("enum");
+        current_enum_value = 0;  // Reset enum counter
         $$ = createNode(NODE_ENUM_SPECIFIER, "enum");
         addChild($$, $2);
         addChild($$, $4);
@@ -877,21 +952,28 @@ enumerator:
         if ($1 && $1->value) {
             // Enum constants are integers, so size is 4 bytes
             insertVariable($1->value, "int", 0, NULL, 0, 0, 0, 0, 0);  // Enum constants are not static
-            // Update the last inserted symbol's kind to enum_constant
+            // Update the last inserted symbol's kind to enum_constant and set its value
             if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
                 strcpy(symtab[symCount - 1].kind, "enum_constant");
+                symtab[symCount - 1].offset = current_enum_value;  // Store enum value in offset field
             }
+            current_enum_value++;  // Increment for next enum constant
         }
         $$ = $1;
     }
     | IDENTIFIER ASSIGN constant_expression {
         if ($1 && $1->value) {
+            // Evaluate the constant expression to get the enum value
+            int enum_val = evaluateConstantExpression($3);
+            
             // Enum constants are integers, so size is 4 bytes
             insertVariable($1->value, "int", 0, NULL, 0, 0, 0, 0, 0);  // Enum constants are not static
-            // Update the last inserted symbol's kind to enum_constant
+            // Update the last inserted symbol's kind to enum_constant and set its value
             if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
                 strcpy(symtab[symCount - 1].kind, "enum_constant");
+                symtab[symCount - 1].offset = enum_val;  // Store enum value in offset field
             }
+            current_enum_value = enum_val + 1;  // Next enum constant will be enum_val + 1
         }
         $$ = $1;
         addChild($$, $3);
