@@ -691,8 +691,19 @@ int isArithmeticType(const char* type) {
 }
 
 int isIntegerType(const char* type) {
-    return (strcmp(type, "int") == 0 || strcmp(type, "char") == 0 ||
-            strcmp(type, "short") == 0 || strcmp(type, "long") == 0);
+    if (!type) return 0;
+    
+    // Resolve typedef first
+    char* resolved = resolveTypedef(type);
+    const char* actual_type = resolved ? resolved : type;
+    
+    // Check for basic integer types
+    int result = (strcmp(actual_type, "int") == 0 || strcmp(actual_type, "char") == 0 ||
+            strcmp(actual_type, "short") == 0 || strcmp(actual_type, "long") == 0 ||
+            strcmp(actual_type, "enum") == 0 || strcmp(actual_type, "_Bool") == 0);
+    
+    if (resolved) free(resolved);
+    return result;
 }
 
 char* usualArithConv(const char* t1, const char* t2) {
@@ -1219,12 +1230,20 @@ TypeCheckResult checkAssignment(TreeNode* lhs, TreeNode* rhs) {
         return TYPE_ERROR;
     }
     
+    // CRITICAL: Resolve typedefs for both sides
+    char* ltype_resolved = resolveTypedef(lhs->dataType);
+    char* rtype_resolved = resolveTypedef(rhs->dataType);
+    const char* ltype = ltype_resolved ? ltype_resolved : lhs->dataType;
+    const char* rtype_raw = rtype_resolved ? rtype_resolved : rhs->dataType;
+    
     // Check for const violations
     // Case 1: Direct assignment to const pointer (e.g., int* const ptr = ...; ptr = &y;)
     if (lhs->type == NODE_IDENTIFIER) {
         Symbol* sym = lookupSymbol(lhs->value);
         if (sym && sym->is_const_ptr) {
             type_error(yylineno, "assignment of read-only variable '%s'", lhs->value);
+            if (ltype_resolved) free(ltype_resolved);
+            if (rtype_resolved) free(rtype_resolved);
             return TYPE_ERROR;
         }
     }
@@ -1237,85 +1256,105 @@ TypeCheckResult checkAssignment(TreeNode* lhs, TreeNode* rhs) {
             Symbol* sym = lookupSymbol(ptr_node->value);
             if (sym && sym->points_to_const) {
                 type_error(yylineno, "assignment of read-only location '*%s'", ptr_node->value);
+                if (ltype_resolved) free(ltype_resolved);
+                if (rtype_resolved) free(rtype_resolved);
                 return TYPE_ERROR;
             }
         }
     }
     
-    const char* ltype = lhs->dataType;
-    const char* rtype = rhs->dataType;
-    
     // Check for invalid array assignments (arrays cannot be assigned)
     // LHS should not be an array type (individual elements are OK via indexing)
     if (isArrayType(ltype)) {
         type_error(yylineno, "cannot assign arrays");
+        if (ltype_resolved) free(ltype_resolved);
+        if (rtype_resolved) free(rtype_resolved);
         return TYPE_ERROR;
     }
     
     // Check if trying to assign array to scalar (before decay)
-    if (isArrayType(rtype) && !strstr(ltype, "*")) {
+    if (isArrayType(rtype_raw) && !strstr(ltype, "*")) {
         // Trying to assign array to non-pointer type (e.g., int x = arr;)
         // Extract base type from array for error message
-        char* base_type = getArrayBaseType(rtype);
+        char* base_type = getArrayBaseType(rtype_raw);
         if (base_type) {
-            type_error(yylineno, "cannot convert array type '%s' to '%s'", rtype, base_type);
+            type_error(yylineno, "cannot convert array type '%s' to '%s'", rtype_raw, base_type);
         } else {
-            type_error(yylineno, "cannot convert array type '%s' to '%s'", rtype, ltype);
+            type_error(yylineno, "cannot convert array type '%s' to '%s'", rtype_raw, ltype);
         }
+        if (ltype_resolved) free(ltype_resolved);
+        if (rtype_resolved) free(rtype_resolved);
         return TYPE_ERROR;
     }
     
     // Apply array-to-pointer decay on RHS (arrays decay when used as rvalues)
-    char* rtype_decayed = decayArrayToPointer(rtype);
+    char* rtype_decayed = decayArrayToPointer(rtype_raw);
+    const char* rtype = rtype_decayed;
     
     // Same type
-    if (strcmp(ltype, rtype_decayed) == 0) {
+    if (strcmp(ltype, rtype) == 0) {
         free(rtype_decayed);
+        if (ltype_resolved) free(ltype_resolved);
+        if (rtype_resolved) free(rtype_resolved);
         return TYPE_OK;
     }
     
     // Arithmetic conversion
-    if (isArithmeticType(ltype) && isArithmeticType(rtype_decayed)) {
-        if (strcmp(ltype, "char") == 0 && strcmp(rtype_decayed, "int") == 0) {
+    if (isArithmeticType(ltype) && isArithmeticType(rtype)) {
+        if (strcmp(ltype, "char") == 0 && strcmp(rtype, "int") == 0) {
             type_warning(yylineno, "conversion from 'int' to 'char' may alter value");
         }
         free(rtype_decayed);
+        if (ltype_resolved) free(ltype_resolved);
+        if (rtype_resolved) free(rtype_resolved);
         return TYPE_OK;
     }
     
     // Pointer assignments (including array-to-pointer decay)
-    if (strstr(ltype, "*") && strstr(rtype_decayed, "*")) {
-        if (isPointerCompatible(ltype, rtype_decayed)) {
+    if (strstr(ltype, "*") && strstr(rtype, "*")) {
+        if (isPointerCompatible(ltype, rtype)) {
             free(rtype_decayed);
+            if (ltype_resolved) free(ltype_resolved);
+            if (rtype_resolved) free(rtype_resolved);
             return TYPE_OK;
         }
         type_warning(yylineno, "assignment from incompatible pointer type");
         free(rtype_decayed);
+        if (ltype_resolved) free(ltype_resolved);
+        if (rtype_resolved) free(rtype_resolved);
         return TYPE_WARNING;
     }
     
     // Pointer = NULL
     if (strstr(ltype, "*") && isNullPointer(rhs)) {
         free(rtype_decayed);
+        if (ltype_resolved) free(ltype_resolved);
+        if (rtype_resolved) free(rtype_resolved);
         return TYPE_OK;
     }
     
     // Pointer = integer (error unless 0)
-    if (strstr(ltype, "*") && isArithmeticType(rtype_decayed)) {
+    if (strstr(ltype, "*") && isArithmeticType(rtype)) {
         type_error(yylineno, "assignment makes pointer from integer without a cast");
         free(rtype_decayed);
+        if (ltype_resolved) free(ltype_resolved);
+        if (rtype_resolved) free(rtype_resolved);
         return TYPE_ERROR;
     }
     
     // Integer = pointer (error)
-    if (isArithmeticType(ltype) && strstr(rtype_decayed, "*")) {
+    if (isArithmeticType(ltype) && strstr(rtype, "*")) {
         type_error(yylineno, "assignment makes integer from pointer without a cast");
         free(rtype_decayed);
+        if (ltype_resolved) free(ltype_resolved);
+        if (rtype_resolved) free(rtype_resolved);
         return TYPE_ERROR;
     }
     
     type_error(yylineno, "incompatible types when assigning to type '%s' from type '%s'", ltype, rtype);
     free(rtype_decayed);
+    if (ltype_resolved) free(ltype_resolved);
+    if (rtype_resolved) free(rtype_resolved);
     return TYPE_ERROR;
 }
 
@@ -1507,14 +1546,19 @@ int isPrintfTypeCompatible(const char* arg_type, const FormatSpec* spec) {
     const char* expected = getPrintfExpectedType(spec);
     if (strcmp(expected, "unknown") == 0) return 0;
     
+    // CRITICAL: Resolve typedef first
+    char* resolved = resolveTypedef(arg_type);
+    const char* actual_type = resolved ? resolved : arg_type;
+    
     // Decay arrays to pointers
-    char* decayed = decayArrayToPointer(arg_type);
+    char* decayed = decayArrayToPointer(actual_type);
     
     // For %s, accept char*, const char*, or char[]
     if (spec->specifier == 's') {
         int result = (strcmp(decayed, "char*") == 0 || 
                      strcmp(decayed, "const char*") == 0);
         free(decayed);
+        if (resolved) free(resolved);
         return result;
     }
     
@@ -1522,6 +1566,7 @@ int isPrintfTypeCompatible(const char* arg_type, const FormatSpec* spec) {
     if (spec->specifier == 'p') {
         int result = (strstr(decayed, "*") != NULL);
         free(decayed);
+        if (resolved) free(resolved);
         return result;
     }
     
@@ -1531,6 +1576,7 @@ int isPrintfTypeCompatible(const char* arg_type, const FormatSpec* spec) {
         spec->specifier == 'X' || spec->specifier == 'o') {
         int result = isIntegerType(decayed);
         free(decayed);
+        if (resolved) free(resolved);
         return result;
     }
     
@@ -1543,6 +1589,7 @@ int isPrintfTypeCompatible(const char* arg_type, const FormatSpec* spec) {
                      strcmp(decayed, "double") == 0 ||
                      strcmp(decayed, "long double") == 0);
         free(decayed);
+        if (resolved) free(resolved);
         return result;
     }
     
@@ -1551,12 +1598,14 @@ int isPrintfTypeCompatible(const char* arg_type, const FormatSpec* spec) {
         int result = (strcmp(decayed, "char") == 0 || 
                      strcmp(decayed, "int") == 0);
         free(decayed);
+        if (resolved) free(resolved);
         return result;
     }
     
     // Exact match required for others
     int result = (strcmp(decayed, expected) == 0);
     free(decayed);
+    if (resolved) free(resolved);
     return result;
 }
 
@@ -1565,13 +1614,18 @@ int isScanfTypeCompatible(const char* arg_type, const FormatSpec* spec) {
     const char* expected = getScanfExpectedType(spec);
     if (strcmp(expected, "unknown") == 0) return 0;
     
+    // CRITICAL: Resolve typedef first
+    char* resolved = resolveTypedef(arg_type);
+    const char* actual_type = resolved ? resolved : arg_type;
+    
     // Decay arrays to pointers
-    char* decayed = decayArrayToPointer(arg_type);
+    char* decayed = decayArrayToPointer(actual_type);
     
     // For %s, accept char* or char[]
     if (spec->specifier == 's') {
         int result = (strcmp(decayed, "char*") == 0);
         free(decayed);
+        if (resolved) free(resolved);
         return result;
     }
     
@@ -1589,12 +1643,14 @@ int isScanfTypeCompatible(const char* arg_type, const FormatSpec* spec) {
         spec->specifier == 'X' || spec->specifier == 'o') {
         if (strcmp(normalized, "int*") == 0 || strcmp(normalized, "unsigned int*") == 0) {
             free(decayed);
+            if (resolved) free(resolved);
             return 1;
         }
     }
     
     int result = (strcmp(normalized, expected) == 0);
     free(decayed);
+    if (resolved) free(resolved);
     return result;
 }
 
@@ -1944,13 +2000,17 @@ TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, con
         return TYPE_ERROR;
     }
     
-    const char* struct_type = struct_expr->dataType;
+    // CRITICAL: Resolve typedef to base type
+    char* resolved_type = resolveTypedef(struct_expr->dataType);
+    const char* struct_type = resolved_type ? resolved_type : struct_expr->dataType;
+    
     int is_pointer = (strstr(struct_type, "*") != NULL);
     
     // ERROR 4: Check operator validity
     if (strcmp(op, ".") == 0 && is_pointer) {
         // Using DOT on a pointer - should use ARROW
         type_error(yylineno, "member reference type '%s' is a pointer; did you mean to use '->'?", struct_type);
+        if (resolved_type) free(resolved_type);
         *result_type = strdup("int");
         return TYPE_ERROR;
     }
@@ -1958,6 +2018,7 @@ TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, con
     if (strcmp(op, "->") == 0 && !is_pointer) {
         // Using ARROW on a non-pointer - should use DOT
         type_error(yylineno, "member reference type '%s' is not a pointer; did you mean to use '.'?", struct_type);
+        if (resolved_type) free(resolved_type);
         *result_type = strdup("int");
         return TYPE_ERROR;
     }
@@ -1995,6 +2056,7 @@ TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, con
     } else {
         // Not a struct or union type
         type_error(yylineno, "request for member '%s' in something not a structure or union", member);
+        if (resolved_type) free(resolved_type);
         *result_type = strdup("int");
         return TYPE_ERROR;
     }
@@ -2004,6 +2066,7 @@ TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, con
     if (!def) {
         type_error(yylineno, "invalid use of undefined %s '%s'", 
                   is_union ? "union" : "struct", tag_name);
+        if (resolved_type) free(resolved_type);
         *result_type = strdup("int");
         return TYPE_ERROR;
     }
@@ -2011,8 +2074,10 @@ TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, con
     // Find the member in the struct/union
     for (int i = 0; i < def->member_count; i++) {
         if (strcmp(def->members[i].name, member) == 0) {
-            // Found the member - return its type
-            *result_type = strdup(def->members[i].type);
+            // Found the member - resolve typedef in member type if needed
+            char* member_type_resolved = resolveTypedef(def->members[i].type);
+            *result_type = member_type_resolved ? member_type_resolved : strdup(def->members[i].type);
+            if (resolved_type) free(resolved_type);
             return TYPE_OK;
         }
     }
@@ -2020,6 +2085,7 @@ TypeCheckResult checkMemberAccess(TreeNode* struct_expr, const char* member, con
     // Member not found
     type_error(yylineno, "'%s %s' has no member named '%s'", 
               is_union ? "union" : "struct", tag_name, member);
+    if (resolved_type) free(resolved_type);
     *result_type = strdup("int");
     return TYPE_ERROR;
 }
@@ -2122,28 +2188,37 @@ void type_warning(int line, const char* msg, ...) {
 int isScalarType(const char* type) {
     if (!type) return 0;
     
+    // CRITICAL: Resolve typedef first
+    char* resolved = resolveTypedef(type);
+    const char* actual_type = resolved ? resolved : type;
+    
     // Pointer types are scalar
-    if (strstr(type, "*") != NULL) {
+    if (strstr(actual_type, "*") != NULL) {
+        if (resolved) free(resolved);
         return 1;
     }
     
     // Arithmetic types are scalar
-    if (isArithmeticType(type)) {
+    if (isArithmeticType(actual_type)) {
+        if (resolved) free(resolved);
         return 1;
     }
     
     // Array types decay to pointers, so they're effectively scalar
-    if (isArrayType(type)) {
+    if (isArrayType(actual_type)) {
+        if (resolved) free(resolved);
         return 1;
     }
     
     // Struct and union types are NOT scalar
-    if (strncmp(type, "struct ", 7) == 0 || strncmp(type, "union ", 6) == 0) {
+    if (strncmp(actual_type, "struct ", 7) == 0 || strncmp(actual_type, "union ", 6) == 0) {
         // Check if it's a pointer to struct/union (already handled above)
         // If we reach here, it's a direct struct/union, which is not scalar
+        if (resolved) free(resolved);
         return 0;
     }
     
+    if (resolved) free(resolved);
     return 0;  // Unknown types are not scalar
 }
 
@@ -2171,6 +2246,48 @@ TypeCheckResult validateConditional(TreeNode* expr) {
     
     free(decayed_type);
     return TYPE_OK;
+}
+
+// Recursively resolve typedef aliases to their base type
+// If the type is a typedef, follow the chain until reaching a non-typedef base type
+char* resolveTypedef(const char* type) {
+    if (!type) return NULL;
+    
+    // Protect against infinite recursion with a depth limit
+    int max_depth = 50;
+    int depth = 0;
+    
+    char* current_type = strdup(type);
+    char* resolved_type = NULL;
+    
+    while (depth < max_depth) {
+        // Search for typedef with this name in symbol table
+        Symbol* typedef_sym = NULL;
+        
+        // Search from most recent to oldest (to respect scope)
+        for (int i = symCount - 1; i >= 0; i--) {
+            if (strcmp(symtab[i].kind, "typedef") == 0 && 
+                strcmp(symtab[i].name, current_type) == 0) {
+                typedef_sym = &symtab[i];
+                break;
+            }
+        }
+        
+        if (!typedef_sym) {
+            // Not a typedef - this is the base type
+            return current_type;
+        }
+        
+        // Found a typedef - get its underlying type
+        resolved_type = strdup(typedef_sym->type);
+        free(current_type);
+        current_type = resolved_type;
+        depth++;
+    }
+    
+    // Max depth reached - possible circular typedef (shouldn't happen in valid code)
+    // Return what we have
+    return current_type;
 }
 
 // Helper function to check if declaration_specifiers contains a specific storage class
