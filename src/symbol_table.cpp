@@ -1865,10 +1865,15 @@ TypeCheckResult checkFunctionCall(const char* func_name, TreeNode* args, char** 
         if (args) {
             for (int i = 0; i < args->childCount && i < func_sym->param_count; i++) {
                 if (args->children[i]->dataType) {
-                    if (!canImplicitConvert(args->children[i]->dataType, func_sym->param_types[i])) {
+                    // Apply array-to-pointer decay on the argument before type checking
+                    char* arg_type_decayed = decayArrayToPointer(args->children[i]->dataType);
+                    
+                    if (!canImplicitConvert(arg_type_decayed, func_sym->param_types[i])) {
                         type_error(yylineno, "incompatible type for argument %d of '%s'", i+1, func_name);
+                        free(arg_type_decayed);
                         return TYPE_ERROR;
                     }
+                    free(arg_type_decayed);
                 }
             }
         }
