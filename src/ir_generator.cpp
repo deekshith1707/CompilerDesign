@@ -1103,7 +1103,6 @@ char* generate_ir(TreeNode* node) {
                 emit("ASSIGN", "1", "", result_temp);
                 
                 emit("LABEL", end_label, "", "");
-                return result_temp;
             } else {
                 // Standard OR evaluation when left is not an AND expression
                 // 1. Evaluate left side
@@ -1132,9 +1131,11 @@ char* generate_ir(TreeNode* node) {
                 
                 // 7. End label
                 emit("LABEL", end_label, "", "");
-                
-                return result_temp;
             }
+            
+            // Logical operators always return int
+            node->dataType = strdup("int");
+            return result_temp;
         }
 
         case NODE_LOGICAL_AND_EXPRESSION:
@@ -1171,6 +1172,8 @@ char* generate_ir(TreeNode* node) {
             // 7. End label
             emit("LABEL", end_label, "", "");
             
+            // Logical operators always return int
+            node->dataType = strdup("int");
             return result_temp;
         }
 
@@ -1178,6 +1181,16 @@ char* generate_ir(TreeNode* node) {
         {
             char* left = generate_ir(node->children[0]);
             char* right = generate_ir(node->children[1]);
+            
+            // Handle type conversions for bitwise operations (should be integer types)
+            if (node->children[0]->dataType && node->children[1]->dataType) {
+                char* common_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
+                left = convertType(left, node->children[0]->dataType, common_type);
+                right = convertType(right, node->children[1]->dataType, common_type);
+                // Result type is the common integer type
+                node->dataType = common_type;
+            }
+            
             char* temp = newTemp();
             emit("BITOR", left, right, temp);
             return temp;
@@ -1187,6 +1200,16 @@ char* generate_ir(TreeNode* node) {
         {
             char* left = generate_ir(node->children[0]);
             char* right = generate_ir(node->children[1]);
+            
+            // Handle type conversions for bitwise operations
+            if (node->children[0]->dataType && node->children[1]->dataType) {
+                char* common_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
+                left = convertType(left, node->children[0]->dataType, common_type);
+                right = convertType(right, node->children[1]->dataType, common_type);
+                // Result type is the common integer type
+                node->dataType = common_type;
+            }
+            
             char* temp = newTemp();
             emit("BITXOR", left, right, temp);
             return temp;
@@ -1196,6 +1219,16 @@ char* generate_ir(TreeNode* node) {
         {
             char* left = generate_ir(node->children[0]);
             char* right = generate_ir(node->children[1]);
+            
+            // Handle type conversions for bitwise operations
+            if (node->children[0]->dataType && node->children[1]->dataType) {
+                char* common_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
+                left = convertType(left, node->children[0]->dataType, common_type);
+                right = convertType(right, node->children[1]->dataType, common_type);
+                // Result type is the common integer type
+                node->dataType = common_type;
+            }
+            
             char* temp = newTemp();
             emit("BITAND", left, right, temp);
             return temp;
@@ -1205,6 +1238,14 @@ char* generate_ir(TreeNode* node) {
         {
             char* left = generate_ir(node->children[0]);
             char* right = generate_ir(node->children[1]);
+            
+            // Handle type conversions for operands if needed
+            if (node->children[0]->dataType && node->children[1]->dataType) {
+                char* common_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
+                left = convertType(left, node->children[0]->dataType, common_type);
+                right = convertType(right, node->children[1]->dataType, common_type);
+            }
+            
             char* temp = newTemp();
             
             if (strcmp(node->value, "==") == 0) {
@@ -1212,6 +1253,9 @@ char* generate_ir(TreeNode* node) {
             } else if (strcmp(node->value, "!=") == 0) {
                 emit("NE", left, right, temp);
             }
+            
+            // Result type of comparison is always int
+            node->dataType = strdup("int");
             return temp;
         }
 
@@ -1219,6 +1263,14 @@ char* generate_ir(TreeNode* node) {
         {
             char* left = generate_ir(node->children[0]);
             char* right = generate_ir(node->children[1]);
+            
+            // Handle type conversions for operands if needed
+            if (node->children[0]->dataType && node->children[1]->dataType) {
+                char* common_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
+                left = convertType(left, node->children[0]->dataType, common_type);
+                right = convertType(right, node->children[1]->dataType, common_type);
+            }
+            
             char* temp = newTemp();
             
             if (strcmp(node->value, "<") == 0) {
@@ -1230,6 +1282,9 @@ char* generate_ir(TreeNode* node) {
             } else if (strcmp(node->value, ">=") == 0) {
                 emit("GE", left, right, temp);
             }
+            
+            // Result type of comparison is always int
+            node->dataType = strdup("int");
             return temp;
         }
 
@@ -1237,6 +1292,13 @@ char* generate_ir(TreeNode* node) {
         {
             char* left = generate_ir(node->children[0]);
             char* right = generate_ir(node->children[1]);
+            
+            // For shift operations, the result type is the type of the left operand
+            // Right operand is converted to int if needed
+            if (node->children[1]->dataType && !isIntegerType(node->children[1]->dataType)) {
+                right = convertType(right, node->children[1]->dataType, "int");
+            }
+            
             char* temp = newTemp();
             
             if (strcmp(node->value, "<<") == 0) {
@@ -1244,6 +1306,12 @@ char* generate_ir(TreeNode* node) {
             } else if (strcmp(node->value, ">>") == 0) {
                 emit("RSHIFT", left, right, temp);
             }
+            
+            // Result type is same as left operand
+            if (node->children[0]->dataType) {
+                node->dataType = node->children[0]->dataType;
+            }
+            
             return temp;
         }
 
@@ -1291,6 +1359,10 @@ char* generate_ir(TreeNode* node) {
                         char* result_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
                         left = convertType(left, node->children[0]->dataType, result_type);
                         right = convertType(right, node->children[1]->dataType, result_type);
+                        // Only set the result type if not already set by semantic analysis
+                        if (!node->dataType) {
+                            node->dataType = result_type;
+                        }
                     }
                     emit("ADD", left, right, temp);
                 }
@@ -1306,6 +1378,10 @@ char* generate_ir(TreeNode* node) {
                         char* result_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
                         left = convertType(left, node->children[0]->dataType, result_type);
                         right = convertType(right, node->children[1]->dataType, result_type);
+                        // Only set the result type if not already set by semantic analysis
+                        if (!node->dataType) {
+                            node->dataType = result_type;
+                        }
                     }
                     emit("SUB", left, right, temp);
                 }
@@ -1323,6 +1399,10 @@ char* generate_ir(TreeNode* node) {
                 char* result_type = usualArithConv(node->children[0]->dataType, node->children[1]->dataType);
                 left = convertType(left, node->children[0]->dataType, result_type);
                 right = convertType(right, node->children[1]->dataType, result_type);
+                // Only set the result type if not already set by semantic analysis
+                if (!node->dataType) {
+                    node->dataType = result_type;
+                }
             }
             
             char* temp = newTemp();
@@ -1445,6 +1525,10 @@ char* generate_ir(TreeNode* node) {
                 char* operand = generate_ir(node->children[0]);
                 char* temp = newTemp();
                 emit("NEG", operand, "", temp);
+                // Result type is same as operand type
+                if (node->children[0]->dataType) {
+                    node->dataType = node->children[0]->dataType;
+                }
                 return temp;
             }
             else if (strcmp(node->value, "~") == 0) {
@@ -1452,6 +1536,10 @@ char* generate_ir(TreeNode* node) {
                 char* operand = generate_ir(node->children[0]);
                 char* temp = newTemp();
                 emit("BITNOT", operand, "", temp);
+                // Result type is same as operand type
+                if (node->children[0]->dataType) {
+                    node->dataType = node->children[0]->dataType;
+                }
                 return temp;
             }
             else if (strcmp(node->value, "!") == 0) {
@@ -1459,6 +1547,8 @@ char* generate_ir(TreeNode* node) {
                 char* operand = generate_ir(node->children[0]);
                 char* temp = newTemp();
                 emit("NOT", operand, "", temp);
+                // Logical NOT always returns int
+                node->dataType = strdup("int");
                 return temp;
             }
             else if (strcmp(node->value, "sizeof") == 0) {
@@ -1473,6 +1563,8 @@ char* generate_ir(TreeNode* node) {
                 }
                 
                 emit("ASSIGN", size_str, "", temp);
+                // sizeof always returns size_t (unsigned int or unsigned long)
+                node->dataType = strdup("int");
                 return temp;
             }
             return NULL;
@@ -1808,6 +1900,13 @@ char* generate_ir(TreeNode* node) {
                     // Simple initialization (including function calls, pointer initialization, etc.)
                     char* rhs_result = generate_ir(rhs); 
                     if (lhs_name && rhs_result) {
+                        // Handle type conversion for initialization if needed
+                        // Get the variable's type from symbol table
+                        extern Symbol* lookupSymbol(const char* name);
+                        Symbol* sym = lookupSymbol(lhs_name);
+                        if (sym && sym->type && rhs->dataType && strcmp(sym->type, rhs->dataType) != 0) {
+                            rhs_result = convertType(rhs_result, rhs->dataType, sym->type);
+                        }
                         emit("ASSIGN", rhs_result, "", lhs_name);
                         return lhs_name;
                     }
