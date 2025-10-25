@@ -31,6 +31,10 @@ int structCount = 0;
 StructDef unionTable[MAX_STRUCTS];
 int unionCount = 0;
 
+// Function pointer registry
+char function_pointers[MAX_SYMBOLS][128];
+int function_pointer_count = 0;
+
 void insertStruct(const char* name, StructMember* members, int member_count) {
     if (structCount >= MAX_STRUCTS) {
         cerr << "Error: Struct table overflow" << endl;
@@ -528,10 +532,27 @@ void markRecentSymbolsAsParameters(int count) {
     // Mark the last 'count' non-function symbols as parameters
     // This is used after moving parameters to function scope
     int marked = 0;
+    Symbol* params[16];  // Store pointers to parameter symbols
+    
     for (int i = symCount - 1; i >= 0 && marked < count; i--) {
         if (!symtab[i].is_function && symtab[i].scope_level == current_scope) {
             strcpy(symtab[i].kind, "parameter");
+            params[marked] = &symtab[i];
             marked++;
+        }
+    }
+    
+    // Also update the function's param_count and param_types
+    // Find the function in the current function scope
+    for (int i = symCount - 1; i >= 0; i--) {
+        if (symtab[i].is_function && strcmp(symtab[i].name, current_function) == 0) {
+            symtab[i].param_count = count;
+            // Copy parameter types and names (in reverse order since we collected them backwards)
+            for (int j = 0; j < count; j++) {
+                strcpy(symtab[i].param_types[j], params[count - 1 - j]->type);
+                strcpy(symtab[i].param_names[j], params[count - 1 - j]->name);
+            }
+            break;
         }
     }
 }
@@ -542,6 +563,23 @@ void insertSymbol(const char* name, const char* type, int is_function, int is_st
     } else {
         insertVariable(name, type, 0, NULL, 0, 0, is_static);
     }
+}
+
+void registerFunctionPointer(const char* name) {
+    if (function_pointer_count < MAX_SYMBOLS) {
+        strncpy(function_pointers[function_pointer_count], name, 127);
+        function_pointers[function_pointer_count][127] = '\0';
+        function_pointer_count++;
+    }
+}
+
+int isFunctionPointerName(const char* name) {
+    for (int i = 0; i < function_pointer_count; i++) {
+        if (strcmp(function_pointers[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int is_type_name(const char* name) {

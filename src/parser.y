@@ -943,6 +943,7 @@ init_declarator:
                 // Mark as function pointer if needed
                 if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                     strcpy(symtab[symCount - 1].kind, "function_pointer");
+                    registerFunctionPointer(varName);  // Register for IR generation
                 }
                 
                 // Reset pending parameters for function pointers (they don't define functions)
@@ -1060,6 +1061,7 @@ init_declarator:
             // Mark as function pointer if needed
             if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                 strcpy(symtab[symCount - 1].kind, "function_pointer");
+                registerFunctionPointer(varName);  // Register for IR generation
             }
             /* emit("ASSIGN", ...) REMOVED */
         }        // Create an AST node for the initialization

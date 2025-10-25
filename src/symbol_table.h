@@ -73,6 +73,10 @@ extern int structCount;
 extern StructDef unionTable[MAX_STRUCTS];
 extern int unionCount;
 
+// Function pointer registry (for IR generation after scope exit)
+extern char function_pointers[MAX_SYMBOLS][128];
+extern int function_pointer_count;
+
 // Function prototypes
 void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static);
 void insertParameter(const char* name, const char* type, int ptr_level);  // For function parameters
@@ -92,6 +96,8 @@ void exitScope();
 void enterFunctionScope(const char* func_name);  // Enter scope for a specific function
 void exitFunctionScope();
 void insertSymbol(const char* name, const char* type, int is_function, int is_static);
+void registerFunctionPointer(const char* name);  // Register a function pointer for IR generation
+int isFunctionPointerName(const char* name);  // Check if a name is a registered function pointer
 void moveRecentSymbolsToCurrentScope(int count);  // Move last N non-function symbols to current scope
 void markRecentSymbolsAsParameters(int count);    // Mark last N symbols as parameters
 int is_type_name(const char* name);

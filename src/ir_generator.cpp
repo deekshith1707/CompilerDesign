@@ -1196,8 +1196,22 @@ char* generate_ir(TreeNode* node) {
                 return temp;
             }
             else if (strcmp(node->value, "()") == 0) {
-                // Function call
-                char* func_name = node->children[0]->value;
+                // Function call (direct or indirect via function pointer)
+                char* func_name = NULL;
+                int is_function_pointer = 0;
+                
+                // Check if this is a function pointer call
+                if (node->children[0]->type == NODE_IDENTIFIER) {
+                    func_name = node->children[0]->value;
+                    
+                    // Check if this identifier is a registered function pointer
+                    extern int isFunctionPointerName(const char* name);
+                    is_function_pointer = isFunctionPointerName(func_name);
+                } else {
+                    // If it's not an identifier, it might be an expression that evaluates to a function pointer
+                    func_name = generate_ir(node->children[0]);
+                    is_function_pointer = 1;  // Assume it's a function pointer if it's an expression
+                }
                 
                 // Process arguments in order (left-to-right as they appear in source)
                 int arg_count = 0;
@@ -1228,7 +1242,14 @@ char* generate_ir(TreeNode* node) {
                 char* temp = newTemp();
                 char arg_count_str[32];
                 sprintf(arg_count_str, "%d", arg_count);
-                emit("CALL", func_name, arg_count_str, temp);
+                
+                if (is_function_pointer) {
+                    // Indirect call through function pointer
+                    emit("INDIRECT_CALL", func_name, arg_count_str, temp);
+                } else {
+                    // Direct function call
+                    emit("CALL", func_name, arg_count_str, temp);
+                }
                 return temp;
             }
             else if (strcmp(node->value, ".") == 0) {
