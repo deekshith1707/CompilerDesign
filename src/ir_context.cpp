@@ -203,6 +203,13 @@ string convertToThreeAddress(const Quadruple& quad) {
     else if (op == "ASSIGN_ARROW") {
         return arg2 + "->" + arg1 + " = " + result;
     }
+    // Explicit pointer offset operations: *(ptr + offset) = value
+    else if (op == "STORE_OFFSET") {
+        return "*(" + arg1 + " + " + arg2 + ") = " + result;
+    }
+    else if (op == "LOAD_OFFSET") {
+        return result + " = *(" + arg1 + " + " + arg2 + ")";
+    }
     
     // Type casting operations: result = cast_op(arg1)
     else if (op.substr(0, 5) == "CAST_") {

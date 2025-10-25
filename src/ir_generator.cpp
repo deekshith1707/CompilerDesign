@@ -319,16 +319,19 @@ char* generate_ir(TreeNode* node) {
                 // Set current function name for static variable tracking
                 strcpy(current_function_name, func_name);
                 
+                // Set current_scope for symbol lookup during IR generation
+                extern int current_scope;
+                int saved_scope = current_scope;
+                current_scope = 1;  // Function scope
+                
                 emit("FUNC_BEGIN", func_name, "", "");
-            }
             
-            // Generate code for function body
-            if (node->childCount > 2) {
-                generate_ir(node->children[2]);
-            }
-            
-            // Add explicit return for void functions (for clarity)
-            if (func_name) {
+                // Generate code for function body
+                if (node->childCount > 2) {
+                    generate_ir(node->children[2]);
+                }
+                
+                // Add explicit return for void functions (for clarity)
                 extern Symbol* lookupSymbol(const char* name);
                 Symbol* func_sym = lookupSymbol(func_name);
                 if (func_sym && func_sym->is_function && strcmp(func_sym->return_type, "void") == 0) {
@@ -337,8 +340,15 @@ char* generate_ir(TreeNode* node) {
                 }
                 
                 emit("FUNC_END", func_name, "", "");
-                // Clear current function name
+                
+                // Restore scope and clear current function name
+                current_scope = saved_scope;
                 current_function_name[0] = '\0';
+            } else {
+                // No function name found, just process children
+                if (node->childCount > 2) {
+                    generate_ir(node->children[2]);
+                }
             }
             
             return NULL;
@@ -738,15 +748,15 @@ char* generate_ir(TreeNode* node) {
                 // Generate RHS first
                 char* rhs_result = generate_ir(node->children[1]);
                 
-                // Handle type conversion if needed
-                if (node->children[0]->dataType && node->children[1]->dataType) {
-                    rhs_result = convertType(rhs_result, node->children[1]->dataType, node->children[0]->dataType);
-                }
-                
                 // Handle different types of LHS
                 TreeNode* lhs = node->children[0];
                 if (lhs->type == NODE_IDENTIFIER) {
                     // Simple variable assignment: x = rhs
+                    // Handle type conversion if needed
+                    if (node->children[0]->dataType && node->children[1]->dataType) {
+                        rhs_result = convertType(rhs_result, node->children[1]->dataType, node->children[0]->dataType);
+                    }
+                    
                     // Use full name for static variables
                     char* lhs_name = lhs->value;
                     if (isStaticVariable(lhs_name)) {
@@ -756,17 +766,157 @@ char* generate_ir(TreeNode* node) {
                     return lhs_name;
                 }
                 else if (lhs->type == NODE_POSTFIX_EXPRESSION && strcmp(lhs->value, ".") == 0) {
-                    // Struct member assignment: struct.member = rhs
-                    char* struct_var = lhs->children[0]->value;
+                    // Struct member assignment: struct.member = rhs or arr[i].member = rhs
+                    TreeNode* base = lhs->children[0];
                     char* member = lhs->children[1]->value;
-                    emit("ASSIGN_MEMBER", member, struct_var, rhs_result);
-                    return struct_var;
+                    
+                    // Check if base is an array access (e.g., points[i])
+                    if (base->type == NODE_POSTFIX_EXPRESSION && strcmp(base->value, "[]") == 0) {
+                        // Array of structs: points[i].member = value
+                        // Generate address: temp_addr = &points[i]
+                        // Then store: *(temp_addr + member_offset) = value
+                        char* array = generate_ir(base->children[0]);
+                        char* index = generate_ir(base->children[1]);
+                        
+                        // Get member offset, type, and struct size
+                        int member_offset = 0;
+                        int struct_size = 0;
+                        const char* member_type = NULL;
+                        
+                        if (base->dataType && strncmp(base->dataType, "struct ", 7) == 0) {
+                            const char* struct_name = base->dataType + 7;
+                            extern StructDef* lookupStruct(const char* name);
+                            StructDef* struct_def = lookupStruct(struct_name);
+                            
+                            if (struct_def) {
+                                struct_size = struct_def->total_size;
+                                for (int i = 0; i < struct_def->member_count; i++) {
+                                    if (strcmp(struct_def->members[i].name, member) == 0) {
+                                        member_offset = struct_def->members[i].offset;
+                                        member_type = struct_def->members[i].type;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Only perform type conversion if we have type info AND types differ
+                        if (member_type && node->children[1]->dataType && 
+                            strcmp(member_type, node->children[1]->dataType) != 0) {
+                            rhs_result = convertType(rhs_result, node->children[1]->dataType, member_type);
+                        }
+                        
+                        // Compute address of array element: temp_addr = array + index * sizeof(struct)
+                        char* elem_addr = newTemp();
+                        if (struct_size > 0) {
+                            // Scale index by struct size: temp_scaled = index * struct_size
+                            char* scaled_index = newTemp();
+                            char size_str[32];
+                            sprintf(size_str, "%d", struct_size);
+                            emit("MUL", index, size_str, scaled_index);
+                            emit("ADD", array, scaled_index, elem_addr);
+                        } else {
+                            // Fallback for non-struct or unknown size
+                            emit("ARRAY_ADDR", array, index, elem_addr);
+                        }
+                        
+                        // Store member: *(elem_addr + member_offset) = value
+                        char offset_str[32];
+                        sprintf(offset_str, "%d", member_offset);
+                        emit("STORE_OFFSET", elem_addr, offset_str, rhs_result);
+                        return array;
+                    } else {
+                        // Simple struct variable assignment
+                        // Get the actual member type from struct definition to ensure correct conversion
+                        char* struct_var = base->value;
+                        
+                        // Look up struct type to get member type
+                        extern Symbol* lookupSymbol(const char* name);
+                        Symbol* sym = lookupSymbol(struct_var);
+                        const char* target_type = NULL;
+                        
+                        if (sym && sym->type && strncmp(sym->type, "struct ", 7) == 0) {
+                            const char* struct_name = sym->type + 7;
+                            extern StructDef* lookupStruct(const char* name);
+                            StructDef* struct_def = lookupStruct(struct_name);
+                            
+                            if (struct_def) {
+                                // Find the member type
+                                for (int i = 0; i < struct_def->member_count; i++) {
+                                    if (strcmp(struct_def->members[i].name, member) == 0) {
+                                        target_type = struct_def->members[i].type;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Only perform type conversion if we have type info AND types differ
+                        if (target_type && node->children[1]->dataType && 
+                            strcmp(target_type, node->children[1]->dataType) != 0) {
+                            rhs_result = convertType(rhs_result, node->children[1]->dataType, target_type);
+                        }
+                        
+                        emit("ASSIGN_MEMBER", member, struct_var, rhs_result);
+                        return struct_var;
+                    }
                 }
                 else if (lhs->type == NODE_POSTFIX_EXPRESSION && strcmp(lhs->value, "->") == 0) {
                     // Pointer member assignment: ptr->member = rhs
+                    // Generate as: *(ptr + offset) = value (explicit address calculation)
                     char* struct_ptr = generate_ir(lhs->children[0]);
                     char* member = lhs->children[1]->value;
-                    emit("ASSIGN_ARROW", member, struct_ptr, rhs_result);
+                    
+                    // Get member offset from struct definition
+                    int member_offset = 0;
+                    const char* member_type = NULL;
+                    
+                    // Try to determine struct type from pointer
+                    TreeNode* ptr_node = lhs->children[0];
+                    if (ptr_node->dataType && strstr(ptr_node->dataType, "*")) {
+                        // Extract struct name from "struct StructName*"
+                        char struct_type[128];
+                        strncpy(struct_type, ptr_node->dataType, sizeof(struct_type) - 1);
+                        struct_type[sizeof(struct_type) - 1] = '\0';
+                        
+                        // Remove the '*' to get "struct StructName"
+                        char* ptr_char = strrchr(struct_type, '*');
+                        if (ptr_char) *ptr_char = '\0';
+                        
+                        // Remove trailing spaces
+                        int len = strlen(struct_type);
+                        while (len > 0 && struct_type[len-1] == ' ') {
+                            struct_type[--len] = '\0';
+                        }
+                        
+                        if (strncmp(struct_type, "struct ", 7) == 0) {
+                            const char* struct_name = struct_type + 7;
+                            extern StructDef* lookupStruct(const char* name);
+                            StructDef* struct_def = lookupStruct(struct_name);
+                            
+                            if (struct_def) {
+                                // Find member offset
+                                for (int i = 0; i < struct_def->member_count; i++) {
+                                    if (strcmp(struct_def->members[i].name, member) == 0) {
+                                        member_offset = struct_def->members[i].offset;
+                                        member_type = struct_def->members[i].type;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Only perform type conversion if we have type info AND types differ
+                    if (member_type && node->children[1]->dataType && 
+                        strcmp(member_type, node->children[1]->dataType) != 0) {
+                        rhs_result = convertType(rhs_result, node->children[1]->dataType, member_type);
+                    }
+                    
+                    // Emit as explicit pointer arithmetic: *(ptr + offset) = value
+                    char offset_str[32];
+                    sprintf(offset_str, "%d", member_offset);
+                    emit("STORE_OFFSET", struct_ptr, offset_str, rhs_result);
                     return struct_ptr;
                 }
                 else if (lhs->type == NODE_POSTFIX_EXPRESSION && strcmp(lhs->value, "[]") == 0) {
@@ -1424,17 +1574,118 @@ char* generate_ir(TreeNode* node) {
                 }
             }
             else if (strcmp(node->value, ".") == 0) {
-                char* struct_var = node->children[0]->value;
-                char* member = node->children[1]->value;
-                char* temp = newTemp();
-                emit("LOAD_MEMBER", struct_var, member, temp);
-                return temp;
+                // Struct member access: struct.member or arr[i].member
+                // Need to handle both simple struct variables and array element access
+                char* struct_var = NULL;
+                TreeNode* base = node->children[0];
+                
+                // Check if base is an array access (e.g., points[i])
+                if (base->type == NODE_POSTFIX_EXPRESSION && strcmp(base->value, "[]") == 0) {
+                    // Array of structs: points[i].member
+                    // Generate address: temp_addr = &points[i]
+                    // Then load: temp = *(temp_addr + member_offset)
+                    char* array = generate_ir(base->children[0]);
+                    char* index = generate_ir(base->children[1]);
+                    char* member = node->children[1]->value;
+                    
+                    // Get member offset and struct size
+                    int member_offset = 0;
+                    int struct_size = 0;
+                    
+                    if (base->dataType && strncmp(base->dataType, "struct ", 7) == 0) {
+                        const char* struct_name = base->dataType + 7;
+                        extern StructDef* lookupStruct(const char* name);
+                        StructDef* struct_def = lookupStruct(struct_name);
+                        
+                        if (struct_def) {
+                            struct_size = struct_def->total_size;
+                            for (int i = 0; i < struct_def->member_count; i++) {
+                                if (strcmp(struct_def->members[i].name, member) == 0) {
+                                    member_offset = struct_def->members[i].offset;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Compute address of array element: temp_addr = array + index * sizeof(struct)
+                    char* elem_addr = newTemp();
+                    if (struct_size > 0) {
+                        // Scale index by struct size: temp_scaled = index * struct_size
+                        char* scaled_index = newTemp();
+                        char size_str[32];
+                        sprintf(size_str, "%d", struct_size);
+                        emit("MUL", index, size_str, scaled_index);
+                        emit("ADD", array, scaled_index, elem_addr);
+                    } else {
+                        // Fallback for non-struct or unknown size
+                        emit("ARRAY_ADDR", array, index, elem_addr);
+                    }
+                    
+                    // Load member: temp = *(elem_addr + member_offset)
+                    char offset_str[32];
+                    sprintf(offset_str, "%d", member_offset);
+                    char* temp = newTemp();
+                    emit("LOAD_OFFSET", elem_addr, offset_str, temp);
+                    return temp;
+                } else {
+                    // Simple struct variable
+                    struct_var = base->value;
+                    char* member = node->children[1]->value;
+                    char* temp = newTemp();
+                    emit("LOAD_MEMBER", struct_var, member, temp);
+                    return temp;
+                }
             }
             else if (strcmp(node->value, "->") == 0) {
+                // Pointer member access: ptr->member
+                // Generate as: temp = *(ptr + offset) (explicit address calculation)
                 char* struct_ptr = generate_ir(node->children[0]);
                 char* member = node->children[1]->value;
+                
+                // Get member offset from struct definition
+                int member_offset = 0;
+                
+                // Try to determine struct type from pointer
+                TreeNode* ptr_node = node->children[0];
+                if (ptr_node->dataType && strstr(ptr_node->dataType, "*")) {
+                    // Extract struct name from "struct StructName*"
+                    char struct_type[128];
+                    strncpy(struct_type, ptr_node->dataType, sizeof(struct_type) - 1);
+                    struct_type[sizeof(struct_type) - 1] = '\0';
+                    
+                    // Remove the '*' to get "struct StructName"
+                    char* ptr_char = strrchr(struct_type, '*');
+                    if (ptr_char) *ptr_char = '\0';
+                    
+                    // Remove trailing spaces
+                    int len = strlen(struct_type);
+                    while (len > 0 && struct_type[len-1] == ' ') {
+                        struct_type[--len] = '\0';
+                    }
+                    
+                    if (strncmp(struct_type, "struct ", 7) == 0) {
+                        const char* struct_name = struct_type + 7;
+                        extern StructDef* lookupStruct(const char* name);
+                        StructDef* struct_def = lookupStruct(struct_name);
+                        
+                        if (struct_def) {
+                            // Find member offset
+                            for (int i = 0; i < struct_def->member_count; i++) {
+                                if (strcmp(struct_def->members[i].name, member) == 0) {
+                                    member_offset = struct_def->members[i].offset;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Emit as explicit pointer arithmetic: temp = *(ptr + offset)
+                char offset_str[32];
+                sprintf(offset_str, "%d", member_offset);
                 char* temp = newTemp();
-                emit("LOAD_ARROW", struct_ptr, member, temp);
+                emit("LOAD_OFFSET", struct_ptr, offset_str, temp);
                 return temp;
             }
             else if (strcmp(node->value, "++_post") == 0) {
@@ -1520,12 +1771,37 @@ char* generate_ir(TreeNode* node) {
                 // Check if RHS is specifically an initializer list (braced initialization)
                 // This should be distinguished from function calls or other multi-child expressions
                 if (rhs->childCount > 1 && rhs->type == NODE_INITIALIZER) {
-                    // Array initialization: arr = {1, 2, 3}
-                    for (int i = 0; i < rhs->childCount; i++) {
-                        char* value = generate_ir(rhs->children[i]);
-                        char index_str[32];
-                        sprintf(index_str, "%d", i);
-                        emit("ASSIGN_ARRAY", index_str, lhs_name, value);
+                    // Need to determine if this is array or struct initialization
+                    // Since type info isn't propagated through AST nodes reliably,
+                    // we need to look at the already-inserted symbol
+                    extern Symbol* lookupSymbol(const char* name);
+                    Symbol* sym = lookupSymbol(lhs_name);
+                    
+                    bool is_struct_init = false;
+                    StructDef* struct_def = NULL;
+                    
+                    if (sym && strncmp(sym->type, "struct ", 7) == 0) {
+                        is_struct_init = true;
+                        const char* struct_name = sym->type + 7;
+                        extern StructDef* lookupStruct(const char* name);
+                        struct_def = lookupStruct(struct_name);
+                    }
+                    
+                    if (is_struct_init && struct_def) {
+                        // Struct initialization: p2 = {10, 20} -> p2.x = 10, p2.y = 20
+                        for (int i = 0; i < rhs->childCount && i < struct_def->member_count; i++) {
+                            char* value = generate_ir(rhs->children[i]);
+                            const char* member_name = struct_def->members[i].name;
+                            emit("ASSIGN_MEMBER", member_name, lhs_name, value);
+                        }
+                    } else {
+                        // Array initialization: arr = {1, 2, 3}
+                        for (int i = 0; i < rhs->childCount; i++) {
+                            char* value = generate_ir(rhs->children[i]);
+                            char index_str[32];
+                            sprintf(index_str, "%d", i);
+                            emit("ASSIGN_ARRAY", index_str, lhs_name, value);
+                        }
                     }
                     return lhs_name;
                 } else {
