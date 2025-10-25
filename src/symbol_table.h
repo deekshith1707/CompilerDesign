@@ -49,6 +49,9 @@ typedef struct Symbol {
     char function_scope[128];  // Name of function this symbol belongs to (for non-global scopes)
     int is_external;           // 1 if this is an external/library function (e.g., printf)
     int is_static;             // 1 if this has static storage class (internal linkage)
+    int is_const;              // 1 if this is const-qualified (e.g., const int* or int* const)
+    int is_const_ptr;          // 1 if this is a const pointer (pointer itself is const, e.g., int* const)
+    int points_to_const;       // 1 if this points to const data (e.g., const int*)
 } Symbol;
 
 // Global symbol table
@@ -78,7 +81,7 @@ extern char function_pointers[MAX_SYMBOLS][128];
 extern int function_pointer_count;
 
 // Function prototypes
-void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static);
+void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static, int points_to_const, int is_const_ptr);
 void insertParameter(const char* name, const char* type, int ptr_level);  // For function parameters
 void insertFunction(const char* name, const char* ret_type, int param_count, char params[][128], char param_names[][128], int is_static);
 void insertExternalFunction(const char* name, const char* ret_type);  // For library/external functions

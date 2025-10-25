@@ -163,7 +163,7 @@ int getTypeSize(const char* type) {
     return 4;
 }
 
-void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static) {
+void insertVariable(const char* name, const char* type, int is_array, int* dims, int num_dims, int ptr_level, int is_static, int points_to_const, int is_const_ptr) {
     if (symCount >= MAX_SYMBOLS) {
         cerr << "Error: Symbol table overflow" << endl;
         return;
@@ -235,6 +235,9 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
     symtab[symCount].is_function = 0;
     symtab[symCount].is_external = 0;  // Variables are never external
     symtab[symCount].is_static = is_static;  // Set static flag
+    symtab[symCount].points_to_const = points_to_const;  // Track if pointing to const data
+    symtab[symCount].is_const_ptr = is_const_ptr;  // Track if pointer itself is const
+    symtab[symCount].is_const = (points_to_const || is_const_ptr);  // Either form of const
     
     // Set the function scope name
     strcpy(symtab[symCount].function_scope, current_function);
@@ -561,7 +564,7 @@ void insertSymbol(const char* name, const char* type, int is_function, int is_st
     if (is_function) {
         insertFunction(name, type, 0, NULL, NULL, is_static);
     } else {
-        insertVariable(name, type, 0, NULL, 0, 0, is_static);
+        insertVariable(name, type, 0, NULL, 0, 0, is_static, 0, 0);
     }
 }
 
@@ -1057,6 +1060,13 @@ TypeCheckResult checkUnaryOp(const char* op, TreeNode* operand, char** result_ty
     
     if (strcmp(op, "*") == 0) {
         if (strstr(optype, "*")) {
+            // Check if trying to dereference a void pointer
+            if (strncmp(optype, "void*", 5) == 0 || strncmp(optype, "void *", 6) == 0) {
+                type_error(yylineno, "invalid use of void expression: cannot dereference void pointer");
+                *result_type = strdup("void");
+                return TYPE_ERROR;
+            }
+            
             // Remove one level of pointer indirection
             char* result_type_str = (char*)malloc(strlen(optype) + 1);
             strcpy(result_type_str, optype);
@@ -1122,6 +1132,29 @@ TypeCheckResult checkAssignment(TreeNode* lhs, TreeNode* rhs) {
     
     if (!lhs->dataType || !rhs->dataType) {
         return TYPE_ERROR;
+    }
+    
+    // Check for const violations
+    // Case 1: Direct assignment to const pointer (e.g., int* const ptr = ...; ptr = &y;)
+    if (lhs->type == NODE_IDENTIFIER) {
+        Symbol* sym = lookupSymbol(lhs->value);
+        if (sym && sym->is_const_ptr) {
+            type_error(yylineno, "assignment of read-only variable '%s'", lhs->value);
+            return TYPE_ERROR;
+        }
+    }
+    
+    // Case 2: Assignment through pointer to const (e.g., const int* ptr; *ptr = 5;)
+    if (lhs->type == NODE_UNARY_EXPRESSION && strcmp(lhs->value, "*") == 0) {
+        // This is a dereference - check if the pointer points to const data
+        TreeNode* ptr_node = lhs->children[0];
+        if (ptr_node->type == NODE_IDENTIFIER) {
+            Symbol* sym = lookupSymbol(ptr_node->value);
+            if (sym && sym->points_to_const) {
+                type_error(yylineno, "assignment of read-only location '*%s'", ptr_node->value);
+                return TYPE_ERROR;
+            }
+        }
     }
     
     const char* ltype = lhs->dataType;

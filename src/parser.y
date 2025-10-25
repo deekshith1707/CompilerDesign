@@ -19,6 +19,8 @@ static int anonymous_struct_counter = 0;
 int recovering_from_error = 0;
 int in_typedef = 0;
 int is_static = 0;  // Flag to track if current declaration is static
+int has_const_before_ptr = 0;  // Flag for "const int*" (pointer to const)
+int has_const_after_ptr = 0;   // Flag for "int* const" (const pointer)
 int in_function_body = 0;  // Flag to track if we're in a function body compound statement
 int param_count_temp = 0;  // Temporary counter for function parameters
 int parsing_function_decl = 0;  // Flag to indicate we're parsing a function declaration
@@ -604,7 +606,7 @@ function_definition:
         
         // Now insert the pending parameters that were stored during parsing
         for (int i = 0; i < pending_param_count; i++) {
-            insertVariable(pending_params[i].name, pending_params[i].type, 0, NULL, 0, pending_params[i].ptrLevel, 0);
+            insertVariable(pending_params[i].name, pending_params[i].type, 0, NULL, 0, pending_params[i].ptrLevel, 0, 0, 0);
         }
         // Mark them as parameters
         markRecentSymbolsAsParameters(pending_param_count);
@@ -643,6 +645,8 @@ declaration:
         addChild($$, $1);
         in_typedef = 0;
         is_static = 0;
+        has_const_before_ptr = 0;
+        has_const_after_ptr = 0;
         recovering_from_error = 0;
         pending_param_count = 0;  // Reset pending parameters (in case this was a function declaration)
     }
@@ -652,6 +656,8 @@ declaration:
         addChild($$, $2);
         in_typedef = 0;
         is_static = 0;
+        has_const_before_ptr = 0;
+        has_const_after_ptr = 0;
         recovering_from_error = 0;
         pending_param_count = 0;  // Reset pending parameters (in case this was a function declaration)
     }
@@ -740,7 +746,10 @@ type_specifier:
     ;
 
 type_qualifier:
-    CONST { $$ = createNode(NODE_TYPE_QUALIFIER, "const"); }
+    CONST { 
+        has_const_before_ptr = 1;  // Track that const appeared in declaration
+        $$ = createNode(NODE_TYPE_QUALIFIER, "const"); 
+    }
     | VOLATILE { $$ = createNode(NODE_TYPE_QUALIFIER, "volatile"); }
     ;
 
@@ -867,7 +876,7 @@ enumerator:
     IDENTIFIER {
         if ($1 && $1->value) {
             // Enum constants are integers, so size is 4 bytes
-            insertVariable($1->value, "int", 0, NULL, 0, 0, 0);  // Enum constants are not static
+            insertVariable($1->value, "int", 0, NULL, 0, 0, 0, 0, 0);  // Enum constants are not static
             // Update the last inserted symbol's kind to enum_constant
             if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
                 strcpy(symtab[symCount - 1].kind, "enum_constant");
@@ -878,7 +887,7 @@ enumerator:
     | IDENTIFIER ASSIGN constant_expression {
         if ($1 && $1->value) {
             // Enum constants are integers, so size is 4 bytes
-            insertVariable($1->value, "int", 0, NULL, 0, 0, 0);  // Enum constants are not static
+            insertVariable($1->value, "int", 0, NULL, 0, 0, 0, 0, 0);  // Enum constants are not static
             // Update the last inserted symbol's kind to enum_constant
             if (symCount > 0 && strcmp(symtab[symCount - 1].name, $1->value) == 0) {
                 strcpy(symtab[symCount - 1].kind, "enum_constant");
@@ -932,14 +941,15 @@ init_declarator:
             
             if (in_typedef) {
                 // Insert the symbol and then manually set its kind to "typedef".
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, 0);  // Typedefs are not static
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, 0, has_const_before_ptr, has_const_after_ptr);  // Typedefs are not static
                 if (symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                     strcpy(symtab[symCount - 1].kind, "typedef");
                 }
             } else {
                 // Always insert the variable into the symbol table
                 // The symbol table will handle duplicates within the same scope/block
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+                // has_const_before_ptr -> points_to_const, has_const_after_ptr -> is_const_ptr
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static, has_const_before_ptr, has_const_after_ptr);
                 // Mark as function pointer if needed
                 if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                     strcpy(symtab[symCount - 1].kind, "function_pointer");
@@ -1057,7 +1067,7 @@ init_declarator:
             
             // Always insert the variable into the symbol table
             // The symbol table will handle duplicates within the same scope/block
-            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static, has_const_before_ptr, has_const_after_ptr);
             // Mark as function pointer if needed
             if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                 strcpy(symtab[symCount - 1].kind, "function_pointer");
@@ -1097,6 +1107,7 @@ declarator:
         /* TODO: This should update the pointer level for symbol table */
     }
     | MULTIPLY type_qualifier_list declarator {
+        has_const_after_ptr = 1;  // const appears after pointer (e.g., int* const)
         $$ = createNode(NODE_POINTER, "*");
         addChild($$, $2); // type_qualifier_list
         addChild($$, $3); // declarator
