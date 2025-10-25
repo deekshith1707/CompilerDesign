@@ -2187,6 +2187,33 @@ primary_expression:
         $$ = $1;
         $$->dataType = strdup("char*");
     }
+       | primary_expression STRING_LITERAL {
+        // String literal concatenation: "str1" "str2" becomes "str1str2"
+        if ($1 && $1->dataType && strcmp($1->dataType, "char*") == 0 && $2) {
+            // Both are string literals - concatenate them
+            size_t len1 = strlen($1->value) - 2;  // -2 to exclude quotes
+            size_t len2 = strlen($2->value) - 2;  // -2 to exclude quotes
+            char* concatenated = (char*)malloc(len1 + len2 + 3); // +3 for quotes and null
+            
+            // Copy first string without closing quote
+            strncpy(concatenated, $1->value, len1 + 1);
+            
+            // Append second string without opening quote
+            strncpy(concatenated + len1 + 1, $2->value + 1, len2 + 1);
+            
+            concatenated[len1 + len2 + 2] = '\0';
+            
+            $$ = createNode(NODE_STRING_LITERAL, concatenated);
+            $$->dataType = strdup("char*");
+            
+            free(concatenated);
+            freeNode($1);
+            freeNode($2);
+        } else {
+            // Error case - should not happen if lexer is correct
+            $$ = $1;
+        }
+    }
     | LPAREN expression RPAREN {
         $$ = $2;
     }
