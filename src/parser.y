@@ -895,15 +895,13 @@ init_declarator:
                     strcpy(symtab[symCount - 1].kind, "typedef");
                 }
             } else {
-                // Only insert if no errors occurred
-                if (error_count == semantic_error_count) {
-                    insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
-                    // Mark as function pointer if needed
-                    if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
-                        strcpy(symtab[symCount - 1].kind, "function_pointer");
-                    }
+                // Always insert the variable into the symbol table
+                // The symbol table will handle duplicates within the same scope/block
+                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+                // Mark as function pointer if needed
+                if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
+                    strcpy(symtab[symCount - 1].kind, "function_pointer");
                 }
-                semantic_error_count = error_count;
                 
                 // Reset pending parameters for function pointers (they don't define functions)
                 if (isFuncPtr) {
@@ -1014,17 +1012,13 @@ init_declarator:
                 free(init_decayed);
             }
             
-            // Only insert if no errors occurred
-            
-            // Only insert if no errors occurred
-            if (error_count == semantic_error_count) {
-                insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
-                // Mark as function pointer if needed
-                if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
-                    strcpy(symtab[symCount - 1].kind, "function_pointer");
-                }
+            // Always insert the variable into the symbol table
+            // The symbol table will handle duplicates within the same scope/block
+            insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static);
+            // Mark as function pointer if needed
+            if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
+                strcpy(symtab[symCount - 1].kind, "function_pointer");
             }
-            semantic_error_count = error_count;
             /* emit("ASSIGN", ...) REMOVED */
         }        // Create an AST node for the initialization
         $$ = createNode(NODE_INITIALIZER, "=");
@@ -1387,24 +1381,31 @@ iteration_statement:
             recovering_from_error = 0;
         }
     | FOR LPAREN
-        declaration                           // $3: init (C99 style variable declaration)
-        for_label_marker                      // $4: marker
-        expression_statement                  // $5: cond
+        {
+            // C99: Variables declared in for loop init are scoped to the loop
+            enterScope();
+        }
+        declaration                           // $4: init (C99 style variable declaration)
+        for_label_marker                      // $5: marker
+        expression_statement                  // $6: cond
         { 
             /* emit("IF_FALSE_GOTO", ...) REMOVED */
         }
-        for_increment_expression              // $7: incr (can be empty)
-        RPAREN                                // $8
-        statement                             // $9: body
+        for_increment_expression              // $8: incr (can be empty)
+        RPAREN                                // $9
+        statement                             // $10: body
         {
             /* All emit and popLoopLabels logic REMOVED */
             $$ = createNode(NODE_ITERATION_STATEMENT, "for");
-            addChild($$, $3);  // init (declaration)
-            addChild($$, $5);  // cond
-            if ($7) addChild($$, $7);  // incr (only if present)
-            addChild($$, $9);  // statement body
-            addChild($$, $4);  // Add the marker node
+            addChild($$, $4);  // init (declaration)
+            addChild($$, $6);  // cond
+            if ($8) addChild($$, $8);  // incr (only if present)
+            addChild($$, $10);  // statement body
+            addChild($$, $5);  // Add the marker node
             recovering_from_error = 0;
+            
+            // Exit the for loop scope
+            exitScope();
         }
     ;
 
