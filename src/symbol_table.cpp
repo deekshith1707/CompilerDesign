@@ -1233,6 +1233,399 @@ TypeCheckResult checkAssignment(TreeNode* lhs, TreeNode* rhs) {
     return TYPE_ERROR;
 }
 
+// ===== PRINTF/SCANF FORMAT STRING VALIDATION =====
+
+// Structure to hold a parsed format specifier
+typedef struct {
+    char specifier;     // d, f, s, c, p, x, o, etc.
+    char length[8];     // l, ll, h, hh, L, etc.
+    int position;       // Position in format string (for error messages)
+} FormatSpec;
+
+// Parse format string and extract all format specifiers
+// Returns number of specifiers found, fills specs array
+int parseFormatString(const char* format_str, FormatSpec* specs, int max_specs) {
+    int count = 0;
+    int len = strlen(format_str);
+    
+    // Remove surrounding quotes
+    int start = (format_str[0] == '"') ? 1 : 0;
+    int end = (format_str[len-1] == '"') ? len - 1 : len;
+    
+    for (int i = start; i < end && count < max_specs; i++) {
+        if (format_str[i] == '%') {
+            i++; // Move past %
+            
+            // Skip flags (-, +, space, #, 0)
+            while (i < end && (format_str[i] == '-' || format_str[i] == '+' || 
+                   format_str[i] == ' ' || format_str[i] == '#' || format_str[i] == '0')) {
+                i++;
+            }
+            
+            // Skip width (digits or *)
+            while (i < end && (isdigit(format_str[i]) || format_str[i] == '*')) {
+                i++;
+            }
+            
+            // Skip precision (.digits or .*)
+            if (i < end && format_str[i] == '.') {
+                i++;
+                while (i < end && (isdigit(format_str[i]) || format_str[i] == '*')) {
+                    i++;
+                }
+            }
+            
+            // Parse length modifier (l, ll, h, hh, L, z, t, j)
+            specs[count].length[0] = '\0';
+            if (i < end) {
+                if (format_str[i] == 'l') {
+                    if (i+1 < end && format_str[i+1] == 'l') {
+                        strcpy(specs[count].length, "ll");
+                        i += 2;
+                    } else {
+                        strcpy(specs[count].length, "l");
+                        i++;
+                    }
+                } else if (format_str[i] == 'h') {
+                    if (i+1 < end && format_str[i+1] == 'h') {
+                        strcpy(specs[count].length, "hh");
+                        i += 2;
+                    } else {
+                        strcpy(specs[count].length, "h");
+                        i++;
+                    }
+                } else if (format_str[i] == 'L' || format_str[i] == 'z' || 
+                           format_str[i] == 't' || format_str[i] == 'j') {
+                    specs[count].length[0] = format_str[i];
+                    specs[count].length[1] = '\0';
+                    i++;
+                }
+            }
+            
+            // Parse conversion specifier
+            if (i < end) {
+                char spec = format_str[i];
+                if (spec == '%') {
+                    // %% is escaped percent, not a specifier
+                    continue;
+                }
+                specs[count].specifier = spec;
+                specs[count].position = i;
+                count++;
+            }
+        }
+    }
+    
+    return count;
+}
+
+// Get expected type for printf format specifier
+const char* getPrintfExpectedType(const FormatSpec* spec) {
+    // Handle length + specifier combinations
+    if (strcmp(spec->length, "ll") == 0) {
+        if (spec->specifier == 'd' || spec->specifier == 'i') return "long long";
+        if (spec->specifier == 'u' || spec->specifier == 'x' || 
+            spec->specifier == 'X' || spec->specifier == 'o') return "unsigned long long";
+    }
+    if (strcmp(spec->length, "l") == 0) {
+        if (spec->specifier == 'd' || spec->specifier == 'i') return "long";
+        if (spec->specifier == 'u' || spec->specifier == 'x' || 
+            spec->specifier == 'X' || spec->specifier == 'o') return "unsigned long";
+        if (spec->specifier == 'f' || spec->specifier == 'e' || 
+            spec->specifier == 'E' || spec->specifier == 'g' || 
+            spec->specifier == 'G' || spec->specifier == 'a' || 
+            spec->specifier == 'A') return "double";
+        if (spec->specifier == 'c') return "wint_t";
+        if (spec->specifier == 's') return "wchar_t*";
+    }
+    if (strcmp(spec->length, "h") == 0) {
+        if (spec->specifier == 'd' || spec->specifier == 'i') return "short";
+        if (spec->specifier == 'u' || spec->specifier == 'x' || 
+            spec->specifier == 'X' || spec->specifier == 'o') return "unsigned short";
+    }
+    if (strcmp(spec->length, "hh") == 0) {
+        if (spec->specifier == 'd' || spec->specifier == 'i') return "char";
+        if (spec->specifier == 'u' || spec->specifier == 'x' || 
+            spec->specifier == 'X' || spec->specifier == 'o') return "unsigned char";
+    }
+    if (strcmp(spec->length, "L") == 0) {
+        if (spec->specifier == 'f' || spec->specifier == 'e' || 
+            spec->specifier == 'E' || spec->specifier == 'g' || 
+            spec->specifier == 'G' || spec->specifier == 'a' || 
+            spec->specifier == 'A') return "long double";
+    }
+    
+    // No length modifier - use standard types
+    switch (spec->specifier) {
+        case 'd': case 'i': return "int";
+        case 'u': case 'x': case 'X': case 'o': return "unsigned int";
+        case 'f': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': return "double";
+        case 'c': return "char";
+        case 's': return "char*";
+        case 'p': return "void*";
+        case 'n': return "int*";
+        default: return "unknown";
+    }
+}
+
+// Get expected type for scanf format specifier (returns pointer type)
+const char* getScanfExpectedType(const FormatSpec* spec) {
+    // Handle length + specifier combinations
+    if (strcmp(spec->length, "ll") == 0) {
+        if (spec->specifier == 'd' || spec->specifier == 'i') return "long long*";
+        if (spec->specifier == 'u' || spec->specifier == 'x' || 
+            spec->specifier == 'X' || spec->specifier == 'o') return "unsigned long long*";
+    }
+    if (strcmp(spec->length, "l") == 0) {
+        if (spec->specifier == 'd' || spec->specifier == 'i') return "long*";
+        if (spec->specifier == 'u' || spec->specifier == 'x' || 
+            spec->specifier == 'X' || spec->specifier == 'o') return "unsigned long*";
+        if (spec->specifier == 'f' || spec->specifier == 'e' || 
+            spec->specifier == 'E' || spec->specifier == 'g' || 
+            spec->specifier == 'G' || spec->specifier == 'a' || 
+            spec->specifier == 'A') return "double*";
+        if (spec->specifier == 's') return "wchar_t*";
+    }
+    if (strcmp(spec->length, "h") == 0) {
+        if (spec->specifier == 'd' || spec->specifier == 'i') return "short*";
+        if (spec->specifier == 'u' || spec->specifier == 'x' || 
+            spec->specifier == 'X' || spec->specifier == 'o') return "unsigned short*";
+    }
+    if (strcmp(spec->length, "hh") == 0) {
+        if (spec->specifier == 'd' || spec->specifier == 'i') return "char*";
+        if (spec->specifier == 'u' || spec->specifier == 'x' || 
+            spec->specifier == 'X' || spec->specifier == 'o') return "unsigned char*";
+    }
+    if (strcmp(spec->length, "L") == 0) {
+        if (spec->specifier == 'f' || spec->specifier == 'e' || 
+            spec->specifier == 'E' || spec->specifier == 'g' || 
+            spec->specifier == 'G' || spec->specifier == 'a' || 
+            spec->specifier == 'A') return "long double*";
+    }
+    
+    // No length modifier - use standard pointer types
+    switch (spec->specifier) {
+        case 'd': case 'i': return "int*";
+        case 'u': case 'x': case 'X': case 'o': return "unsigned int*";
+        case 'f': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': return "float*";
+        case 'c': return "char*";
+        case 's': return "char*";
+        case 'p': return "void**";
+        case 'n': return "int*";
+        default: return "unknown";
+    }
+}
+
+// Check if argument type is compatible with printf format specifier
+int isPrintfTypeCompatible(const char* arg_type, const FormatSpec* spec) {
+    const char* expected = getPrintfExpectedType(spec);
+    if (strcmp(expected, "unknown") == 0) return 0;
+    
+    // Decay arrays to pointers
+    char* decayed = decayArrayToPointer(arg_type);
+    
+    // For %s, accept char*, const char*, or char[]
+    if (spec->specifier == 's') {
+        int result = (strcmp(decayed, "char*") == 0 || 
+                     strcmp(decayed, "const char*") == 0);
+        free(decayed);
+        return result;
+    }
+    
+    // For %p, accept any pointer type
+    if (spec->specifier == 'p') {
+        int result = (strstr(decayed, "*") != NULL);
+        free(decayed);
+        return result;
+    }
+    
+    // For integer specifiers, allow implicit conversions between integer types
+    if (spec->specifier == 'd' || spec->specifier == 'i' || 
+        spec->specifier == 'u' || spec->specifier == 'x' || 
+        spec->specifier == 'X' || spec->specifier == 'o') {
+        int result = isIntegerType(decayed);
+        free(decayed);
+        return result;
+    }
+    
+    // For floating point specifiers, allow float/double conversions
+    if (spec->specifier == 'f' || spec->specifier == 'e' || 
+        spec->specifier == 'E' || spec->specifier == 'g' || 
+        spec->specifier == 'G' || spec->specifier == 'a' || 
+        spec->specifier == 'A') {
+        int result = (strcmp(decayed, "float") == 0 || 
+                     strcmp(decayed, "double") == 0 ||
+                     strcmp(decayed, "long double") == 0);
+        free(decayed);
+        return result;
+    }
+    
+    // For %c, accept char or int
+    if (spec->specifier == 'c') {
+        int result = (strcmp(decayed, "char") == 0 || 
+                     strcmp(decayed, "int") == 0);
+        free(decayed);
+        return result;
+    }
+    
+    // Exact match required for others
+    int result = (strcmp(decayed, expected) == 0);
+    free(decayed);
+    return result;
+}
+
+// Check if argument type is compatible with scanf format specifier
+int isScanfTypeCompatible(const char* arg_type, const FormatSpec* spec) {
+    const char* expected = getScanfExpectedType(spec);
+    if (strcmp(expected, "unknown") == 0) return 0;
+    
+    // Decay arrays to pointers
+    char* decayed = decayArrayToPointer(arg_type);
+    
+    // For %s, accept char* or char[]
+    if (spec->specifier == 's') {
+        int result = (strcmp(decayed, "char*") == 0);
+        free(decayed);
+        return result;
+    }
+    
+    // For other specifiers, must be exact pointer match or allow some flexibility
+    // Remove const qualifiers for comparison
+    char normalized[128];
+    strcpy(normalized, decayed);
+    char* const_pos = strstr(normalized, "const ");
+    if (const_pos) {
+        memmove(const_pos, const_pos + 6, strlen(const_pos + 6) + 1);
+    }
+    
+    // Allow int* for %d even if expecting unsigned int* (common practice)
+    if (spec->specifier == 'u' || spec->specifier == 'x' || 
+        spec->specifier == 'X' || spec->specifier == 'o') {
+        if (strcmp(normalized, "int*") == 0 || strcmp(normalized, "unsigned int*") == 0) {
+            free(decayed);
+            return 1;
+        }
+    }
+    
+    int result = (strcmp(normalized, expected) == 0);
+    free(decayed);
+    return result;
+}
+
+// Validate printf call
+TypeCheckResult validatePrintf(TreeNode* args) {
+    if (!args || args->childCount == 0) {
+        type_error(yylineno, "too few arguments to function 'printf'");
+        return TYPE_ERROR;
+    }
+    
+    // First argument must be a string literal (format string)
+    TreeNode* format_arg = args->children[0];
+    if (format_arg->type != NODE_STRING_LITERAL) {
+        type_warning(yylineno, "format not a string literal (potentially insecure)");
+        return TYPE_WARNING;
+    }
+    
+    // Parse format string
+    FormatSpec specs[32];
+    int spec_count = parseFormatString(format_arg->value, specs, 32);
+    
+    // Check argument count
+    int provided_args = args->childCount - 1; // Exclude format string
+    if (provided_args < spec_count) {
+        type_error(yylineno, "too few arguments for format (expected %d, got %d)", 
+                  spec_count, provided_args);
+        return TYPE_ERROR;
+    }
+    if (provided_args > spec_count) {
+        type_error(yylineno, "too many arguments for format (expected %d, got %d)", 
+                  spec_count, provided_args);
+        return TYPE_ERROR;
+    }
+    
+    // Check each argument type
+    TypeCheckResult result = TYPE_OK;
+    for (int i = 0; i < spec_count; i++) {
+        TreeNode* arg = args->children[i + 1];
+        if (!arg->dataType) continue;
+        
+        if (!isPrintfTypeCompatible(arg->dataType, &specs[i])) {
+            const char* expected = getPrintfExpectedType(&specs[i]);
+            char* arg_decayed = decayArrayToPointer(arg->dataType);
+            type_error(yylineno, "format '%%%c' expects argument of type '%s', but argument %d has type '%s'",
+                      specs[i].specifier, expected, i + 2, arg_decayed);
+            free(arg_decayed);
+            result = TYPE_ERROR;
+        }
+    }
+    
+    return result;
+}
+
+// Validate scanf call
+TypeCheckResult validateScanf(TreeNode* args) {
+    if (!args || args->childCount == 0) {
+        type_error(yylineno, "too few arguments to function 'scanf'");
+        return TYPE_ERROR;
+    }
+    
+    // First argument must be a string literal (format string)
+    TreeNode* format_arg = args->children[0];
+    if (format_arg->type != NODE_STRING_LITERAL) {
+        type_warning(yylineno, "format not a string literal (potentially insecure)");
+        return TYPE_WARNING;
+    }
+    
+    // Parse format string
+    FormatSpec specs[32];
+    int spec_count = parseFormatString(format_arg->value, specs, 32);
+    
+    // Check argument count
+    int provided_args = args->childCount - 1; // Exclude format string
+    if (provided_args < spec_count) {
+        type_error(yylineno, "too few arguments for format (expected %d, got %d)", 
+                  spec_count, provided_args);
+        return TYPE_ERROR;
+    }
+    if (provided_args > spec_count) {
+        type_error(yylineno, "too many arguments for format (expected %d, got %d)", 
+                  spec_count, provided_args);
+        return TYPE_ERROR;
+    }
+    
+    // Check each argument type - must be pointers
+    TypeCheckResult result = TYPE_OK;
+    for (int i = 0; i < spec_count; i++) {
+        TreeNode* arg = args->children[i + 1];
+        if (!arg->dataType) continue;
+        
+        // Special case: %s with char[] is acceptable (array decays to pointer)
+        char* arg_decayed = decayArrayToPointer(arg->dataType);
+        
+        // Check if it's a pointer type
+        if (!strstr(arg_decayed, "*") && specs[i].specifier != 's') {
+            type_error(yylineno, "format '%%%c' expects argument of type '%s', but argument %d has type '%s' (missing '&'?)",
+                      specs[i].specifier, getScanfExpectedType(&specs[i]), i + 2, arg_decayed);
+            free(arg_decayed);
+            result = TYPE_ERROR;
+            continue;
+        }
+        
+        // Check pointer type compatibility
+        if (!isScanfTypeCompatible(arg_decayed, &specs[i])) {
+            const char* expected = getScanfExpectedType(&specs[i]);
+            type_error(yylineno, "format '%%%c' expects argument of type '%s', but argument %d has type '%s'",
+                      specs[i].specifier, expected, i + 2, arg_decayed);
+            free(arg_decayed);
+            result = TYPE_ERROR;
+        } else {
+            free(arg_decayed);
+        }
+    }
+    
+    return result;
+}
+
 // Function call validation
 TypeCheckResult checkFunctionCall(const char* func_name, TreeNode* args, char** result_type) {
     Symbol* func_sym = lookupSymbol(func_name);
@@ -1254,6 +1647,73 @@ TypeCheckResult checkFunctionCall(const char* func_name, TreeNode* args, char** 
         *result_type = strdup("int");
     } else {
         *result_type = strdup(func_sym->return_type);
+    }
+    
+    // === PRINTF/SCANF SEMANTIC VALIDATION ===
+    if (func_sym->is_external) {
+        // Validate printf family functions
+        if (strcmp(func_name, "printf") == 0 || strcmp(func_name, "fprintf") == 0 || 
+            strcmp(func_name, "sprintf") == 0 || strcmp(func_name, "snprintf") == 0) {
+            // For fprintf/sprintf/snprintf, skip first arg (FILE*/buffer/buffer+size)
+            TreeNode* printf_args = args;
+            if (strcmp(func_name, "fprintf") == 0 || strcmp(func_name, "sprintf") == 0) {
+                // Create a temporary args node starting from second argument
+                if (args && args->childCount > 1) {
+                    printf_args = createNode(NODE_EXPRESSION, "temp_args");
+                    for (int i = 1; i < args->childCount; i++) {
+                        addChild(printf_args, args->children[i]);
+                    }
+                }
+            } else if (strcmp(func_name, "snprintf") == 0) {
+                // Skip first two arguments (buffer and size)
+                if (args && args->childCount > 2) {
+                    printf_args = createNode(NODE_EXPRESSION, "temp_args");
+                    for (int i = 2; i < args->childCount; i++) {
+                        addChild(printf_args, args->children[i]);
+                    }
+                }
+            }
+            
+            TypeCheckResult printf_result = validatePrintf(printf_args);
+            
+            // Clean up temporary node if created
+            if (printf_args != args && printf_args) {
+                // Don't free children, just the container
+                free(printf_args);
+            }
+            
+            if (printf_result == TYPE_ERROR) {
+                return TYPE_ERROR;
+            }
+        }
+        
+        // Validate scanf family functions
+        if (strcmp(func_name, "scanf") == 0 || strcmp(func_name, "fscanf") == 0 || 
+            strcmp(func_name, "sscanf") == 0) {
+            // For fscanf/sscanf, skip first arg (FILE*/string)
+            TreeNode* scanf_args = args;
+            if (strcmp(func_name, "fscanf") == 0 || strcmp(func_name, "sscanf") == 0) {
+                // Create a temporary args node starting from second argument
+                if (args && args->childCount > 1) {
+                    scanf_args = createNode(NODE_EXPRESSION, "temp_args");
+                    for (int i = 1; i < args->childCount; i++) {
+                        addChild(scanf_args, args->children[i]);
+                    }
+                }
+            }
+            
+            TypeCheckResult scanf_result = validateScanf(scanf_args);
+            
+            // Clean up temporary node if created
+            if (scanf_args != args && scanf_args) {
+                // Don't free children, just the container
+                free(scanf_args);
+            }
+            
+            if (scanf_result == TYPE_ERROR) {
+                return TYPE_ERROR;
+            }
+        }
     }
     
     // Strict argument checking for specific stdlib functions
