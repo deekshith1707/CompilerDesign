@@ -24,6 +24,17 @@ int param_count_temp = 0;  // Temporary counter for function parameters
 int parsing_function_decl = 0;  // Flag to indicate we're parsing a function declaration
 int in_function_definition = 0;  // Flag to indicate we're parsing a function definition (not just a declaration)
 char function_return_type[128] = "int";  // Save function return type before parsing parameters
+int loop_depth = 0;  // Track nesting depth of loops (for break/continue validation)
+int switch_depth = 0;  // Track nesting depth of switch statements (for break validation)
+
+// Structure to track goto statements for validation
+typedef struct {
+    char label_name[256];
+    int line_number;
+} GotoRef;
+
+GotoRef pending_gotos[100];  // Track up to 100 goto statements per function
+int pending_goto_count = 0;
 
 // Structure to store parameter information during parsing
 typedef struct {
@@ -587,6 +598,16 @@ function_definition:
         addChild($$, $1); // declaration_specifiers
         addChild($$, $2); // declarator (name)
         addChild($$, $4); // compound_statement (body)
+        
+        // Validate all goto statements now that all labels are defined
+        for (int i = 0; i < pending_goto_count; i++) {
+            Symbol* label = lookupLabel(pending_gotos[i].label_name);
+            if (!label) {
+                type_error(pending_gotos[i].line_number, "Undefined label '%s'", 
+                          pending_gotos[i].label_name);
+            }
+        }
+        pending_goto_count = 0;  // Reset for next function
         
         in_function_body = 0;
         param_count_temp = 0;
@@ -1309,11 +1330,14 @@ selection_statement:
         addChild($$, $5); // The 'else' statement
         recovering_from_error = 0;
       }
-    | SWITCH LPAREN expression RPAREN statement {
+    | SWITCH LPAREN expression RPAREN {
+        switch_depth++;  // Enter switch context
+    } statement {
         /* All label, stack, and emit logic REMOVED */
+        switch_depth--;  // Exit switch context
         $$ = createNode(NODE_SELECTION_STATEMENT, "switch");
         addChild($$, $3); // The expression
-        addChild($$, $5); // The statement
+        addChild($$, $6); // The statement
         recovering_from_error = 0;
     }
     ;
@@ -1321,6 +1345,7 @@ selection_statement:
 /* == Helper rules for do-while/until == */
 do_header:
     DO {
+        loop_depth++;  // Enter loop context
         $$ = createNode(NODE_MARKER, "do_header");
         /* All label, stack, and emit logic REMOVED */
     }
@@ -1343,10 +1368,12 @@ iteration_statement:
     WHILE LPAREN marker_while_start expression RPAREN
     {
         /* emit("IF_FALSE_GOTO", ...) REMOVED */
+        loop_depth++;  // Enter loop context
     }
     statement
     {
         /* All emit and popLoopLabels logic REMOVED */
+        loop_depth--;  // Exit loop context
         $$ = createNode(NODE_ITERATION_STATEMENT, "while");
         addChild($$, $4); // expression
         addChild($$, $7); // statement
@@ -1355,6 +1382,7 @@ iteration_statement:
     }
     | do_header statement do_trailer {
         /* All emit and popLoopLabels logic REMOVED */
+        loop_depth--;  // Exit loop context (entered in do_header)
         $$ = $3; // The node (do_while/do_until) created in do_trailer
         addChild($$, $1); // do_header marker
         addChild($$, $2); // statement
@@ -1366,12 +1394,14 @@ iteration_statement:
         expression_statement                  // $5: cond
         { 
             /* emit("IF_FALSE_GOTO", ...) REMOVED */
+            loop_depth++;  // Enter loop context
         }
         for_increment_expression              // $7: incr (can be empty)
         RPAREN                                // $8
         statement                             // $9: body
         {
             /* All emit and popLoopLabels logic REMOVED */
+            loop_depth--;  // Exit loop context
             $$ = createNode(NODE_ITERATION_STATEMENT, "for");
             addChild($$, $3);  // init
             addChild($$, $5);  // cond
@@ -1390,12 +1420,14 @@ iteration_statement:
         expression_statement                  // $6: cond
         { 
             /* emit("IF_FALSE_GOTO", ...) REMOVED */
+            loop_depth++;  // Enter loop context
         }
         for_increment_expression              // $8: incr (can be empty)
         RPAREN                                // $9
         statement                             // $10: body
         {
             /* All emit and popLoopLabels logic REMOVED */
+            loop_depth--;  // Exit loop context
             $$ = createNode(NODE_ITERATION_STATEMENT, "for");
             addChild($$, $4);  // init (declaration)
             addChild($$, $6);  // cond
@@ -1412,15 +1444,29 @@ iteration_statement:
 jump_statement:
     GOTO IDENTIFIER SEMICOLON {
         /* emit("GOTO", ...) REMOVED */
+        // Record goto for later validation (after all labels are defined)
+        if ($2 && $2->value && pending_goto_count < 100) {
+            strcpy(pending_gotos[pending_goto_count].label_name, $2->value);
+            pending_gotos[pending_goto_count].line_number = yylineno;
+            pending_goto_count++;
+        }
         $$ = createNode(NODE_JUMP_STATEMENT, "goto");
         addChild($$, $2);
     }
     | CONTINUE SEMICOLON {
         /* All label logic and emit REMOVED */
+        // Semantic check: continue must be inside a loop
+        if (loop_depth == 0) {
+            type_error(yylineno, "'continue' statement not in loop");
+        }
         $$ = createNode(NODE_JUMP_STATEMENT, "continue");
     }
     | BREAK SEMICOLON {
         /* All label logic and emit REMOVED */
+        // Semantic check: break must be inside a loop or switch
+        if (loop_depth == 0 && switch_depth == 0) {
+            type_error(yylineno, "'break' statement not in loop or switch");
+        }
         $$ = createNode(NODE_JUMP_STATEMENT, "break");
     }
     | RETURN SEMICOLON {
