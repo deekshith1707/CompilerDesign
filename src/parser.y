@@ -1317,6 +1317,10 @@ expression_statement:
 
 if_header:
     IF LPAREN expression RPAREN {
+        // Check that the condition expression is not void
+        if ($3 && $3->dataType && strcmp($3->dataType, "void") == 0) {
+            type_error(yylineno, "void value not ignored as it ought to be");
+        }
         $$ = $3; // Pass the expression node up
         /* All label and emit logic is REMOVED */
     }
@@ -1380,11 +1384,19 @@ do_header:
 do_trailer:
     WHILE LPAREN expression RPAREN SEMICOLON {
         /* emit("IF_TRUE_GOTO", ...) REMOVED */
+        // Check that the condition expression is not void
+        if ($3 && $3->dataType && strcmp($3->dataType, "void") == 0) {
+            type_error(yylineno, "void value not ignored as it ought to be");
+        }
         $$ = createNode(NODE_ITERATION_STATEMENT, "do_while");
         addChild($$, $3); // expression
     }
     | UNTIL LPAREN expression RPAREN SEMICOLON {
         /* emit("IF_FALSE_GOTO", ...) REMOVED */
+        // Check that the condition expression is not void
+        if ($3 && $3->dataType && strcmp($3->dataType, "void") == 0) {
+            type_error(yylineno, "void value not ignored as it ought to be");
+        }
         $$ = createNode(NODE_ITERATION_STATEMENT, "do_until");
         addChild($$, $3); // expression
     }
@@ -1394,6 +1406,10 @@ iteration_statement:
     WHILE LPAREN marker_while_start expression RPAREN
     {
         /* emit("IF_FALSE_GOTO", ...) REMOVED */
+        // Check that the condition expression is not void
+        if ($4 && $4->dataType && strcmp($4->dataType, "void") == 0) {
+            type_error(yylineno, "void value not ignored as it ought to be");
+        }
         loop_depth++;  // Enter loop context
     }
     statement
@@ -1420,6 +1436,13 @@ iteration_statement:
         expression_statement                  // $5: cond
         { 
             /* emit("IF_FALSE_GOTO", ...) REMOVED */
+            // Check that the condition expression is not void (if present)
+            if ($5 && $5->childCount > 0 && $5->children[0]) {
+                TreeNode* cond = $5->children[0];
+                if (cond->dataType && strcmp(cond->dataType, "void") == 0) {
+                    type_error(yylineno, "void value not ignored as it ought to be");
+                }
+            }
             loop_depth++;  // Enter loop context
         }
         for_increment_expression              // $7: incr (can be empty)
@@ -1446,6 +1469,13 @@ iteration_statement:
         expression_statement                  // $6: cond
         { 
             /* emit("IF_FALSE_GOTO", ...) REMOVED */
+            // Check that the condition expression is not void (if present)
+            if ($6 && $6->childCount > 0 && $6->children[0]) {
+                TreeNode* cond = $6->children[0];
+                if (cond->dataType && strcmp(cond->dataType, "void") == 0) {
+                    type_error(yylineno, "void value not ignored as it ought to be");
+                }
+            }
             loop_depth++;  // Enter loop context
         }
         for_increment_expression              // $8: incr (can be empty)
@@ -1705,20 +1735,22 @@ equality_expression:
         $$ = $1;
     }
     | equality_expression EQ relational_expression {
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp("==", $1, $3, &result_type);
+        
         $$ = createNode(NODE_EQUALITY_EXPRESSION, "==");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     | equality_expression NE relational_expression {
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp("!=", $1, $3, &result_type);
+        
         $$ = createNode(NODE_EQUALITY_EXPRESSION, "!=");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     ;
 
@@ -1727,36 +1759,40 @@ relational_expression:
         $$ = $1;
     }
     | relational_expression LT shift_expression {
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp("<", $1, $3, &result_type);
+        
         $$ = createNode(NODE_RELATIONAL_EXPRESSION, "<");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     | relational_expression GT shift_expression {
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp(">", $1, $3, &result_type);
+        
         $$ = createNode(NODE_RELATIONAL_EXPRESSION, ">");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     | relational_expression LE shift_expression {
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp("<=", $1, $3, &result_type);
+        
         $$ = createNode(NODE_RELATIONAL_EXPRESSION, "<=");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     | relational_expression GE shift_expression {
-        /* emit(...) and newTemp() REMOVED */
+        char* result_type = NULL;
+        TypeCheckResult result = checkBinaryOp(">=", $1, $3, &result_type);
+        
         $$ = createNode(NODE_RELATIONAL_EXPRESSION, ">=");
         addChild($$, $1);
         addChild($$, $3);
-        $$->dataType = strdup("int");
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     ;
 
@@ -1992,22 +2028,13 @@ postfix_expression:
         $$->isLValue = 1;
     }
     | postfix_expression LPAREN RPAREN {
-        /* == Check for undeclared function and implicitly declare it == */
-        Symbol* sym = lookupSymbol($1->value);
-        if (!sym) {
-            insertExternalFunction($1->value, "int");
-        } else if (!sym->is_function && strcmp(sym->kind, "function_pointer") != 0) {
-            char err_msg[256];
-            sprintf(err_msg, "Called object '%s' is not a function or function pointer", $1->value);
-            yyerror(err_msg);
-        }
-
-        /* newTemp(), emit("CALL") REMOVED */
+        // Enhanced function call type checking (no arguments)
+        char* result_type = NULL;
+        TypeCheckResult result = checkFunctionCall($1->value, NULL, &result_type);
         
         $$ = createNode(NODE_POSTFIX_EXPRESSION, "()");
         addChild($$, $1);
-        $$->dataType = strdup("int"); // Should be sym->return_type
-        /* $$->tacResult = ... REMOVED */
+        $$->dataType = result_type;
     }
     | postfix_expression LPAREN argument_expression_list RPAREN {
         // Enhanced function call type checking
