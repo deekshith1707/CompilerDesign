@@ -142,6 +142,9 @@ static SwitchContext switchStack[MAX_LOOP_DEPTH];
 static int switchDepth = 0;
 static int switchCount = 0;
 
+// Break statement tracking for backpatching
+static JumpList* break_lists[MAX_LOOP_DEPTH] = {NULL};  // Track break statements per loop level
+
 // Helper functions for control flow
 static void pushLoopLabels(char* continue_label, char* break_label) {
     if (loopDepth >= MAX_LOOP_DEPTH) {
@@ -150,6 +153,7 @@ static void pushLoopLabels(char* continue_label, char* break_label) {
     }
     loopStack[loopDepth].continue_label = continue_label;
     loopStack[loopDepth].break_label = break_label;
+    break_lists[loopDepth] = NULL;  // Initialize break list for this loop level
     loopDepth++;
 }
 
@@ -163,6 +167,13 @@ static char* getCurrentLoopContinue() {
 
 static char* getCurrentLoopBreak() {
     return (loopDepth > 0) ? loopStack[loopDepth - 1].break_label : NULL;
+}
+
+static void addBreakJump(int jump_index) {
+    if (loopDepth > 0) {
+        JumpList* new_jump = makelist(jump_index);
+        break_lists[loopDepth - 1] = merge(break_lists[loopDepth - 1], new_jump);
+    }
 }
 
 static void pushSwitchLabel(char* end_label, char* default_label) {
@@ -404,24 +415,20 @@ char* generate_ir(TreeNode* node) {
         case NODE_DECLARATION:
         {
             // Process all children, handling multiple declarators properly
-            for (int i = 0; i < node->childCount; i++) {
+            // Child 0: declaration_specifiers (type)
+            // Child 1+: init_declarators (potentially multiple for comma-separated declarations)
+            for (int i = 1; i < node->childCount; i++) {
                 TreeNode* child = node->children[i];
                 
-                // Skip declaration_specifiers (type info), process init_declarator_list
-                if (child && i > 0) {  // Skip first child which is usually declaration_specifiers
-                    // Process this child (could be init_declarator or init_declarator_list)
+                if (child) {
                     // If it's a NODE_INITIALIZER, generate IR for it
                     if (child->type == NODE_INITIALIZER) {
                         generate_ir(child);
                     }
-                    // If it has children, they might be init_declarators in a list
-                    else if (child->childCount > 0) {
-                        for (int j = 0; j < child->childCount; j++) {
-                            TreeNode* declarator = child->children[j];
-                            if (declarator && declarator->type == NODE_INITIALIZER) {
-                                generate_ir(declarator);
-                            }
-                        }
+                    // If it has children, recursively process them (for init_declarator_list)
+                    else {
+                        // Recursively process any nested declarators
+                        generate_ir(child);
                     }
                 }
             }
@@ -451,40 +458,40 @@ char* generate_ir(TreeNode* node) {
             if (strcmp(node->value, "if") == 0) {
                 char* cond_result = generate_ir(node->children[0]);
                 
-                char* else_label = newLabel();
-                if (cond_result) {
-                    // Use appropriate comparison based on condition data type
-                    const char* dataType = (node->children[0] && node->children[0]->dataType) ? 
-                                          node->children[0]->dataType : "int";
-                    emitConditionalJump("IF_FALSE_GOTO", cond_result, else_label, dataType);
-                }
+                // Create end label
+                char* end_label = newLabel();
+                
+                // Emit conditional jump with label (not placeholder)
+                int jump_index = emitWithIndex("IF_FALSE_GOTO", cond_result, end_label, "");
                 
                 // Then block
                 if (node->childCount > 1) {
                     generate_ir(node->children[1]);
                 }
                 
-                emit("LABEL", else_label, "", "");
+                // Emit the end label
+                emit("LABEL", end_label, "", "");
             }
             else if (strcmp(node->value, "if_else") == 0) {
                 char* cond_result = generate_ir(node->children[0]);
                 
+                // Create labels
                 char* else_label = newLabel();
                 char* end_label = newLabel();
                 
-                if (cond_result) {
-                    // Use appropriate comparison based on condition data type
-                    const char* dataType = (node->children[0] && node->children[0]->dataType) ? 
-                                          node->children[0]->dataType : "int";
-                    emitConditionalJump("IF_FALSE_GOTO", cond_result, else_label, dataType);
-                }
+                // Emit conditional jump to else
+                int false_jump_index = emitWithIndex("IF_FALSE_GOTO", cond_result, else_label, "");
                 
                 // Then block
                 if (node->childCount > 1) {
                     generate_ir(node->children[1]);
                 }
                 
-                emit("GOTO", end_label, "", "");
+                // Emit unconditional jump to end (with placeholder for backpatching)
+                int end_jump_index = emitWithIndex("GOTO", "PLACEHOLDER", "", "");
+                JumpList* end_list = makelist(end_jump_index);
+                
+                // Emit else label
                 emit("LABEL", else_label, "", "");
                 
                 // Else block
@@ -492,6 +499,11 @@ char* generate_ir(TreeNode* node) {
                     generate_ir(node->children[2]);
                 }
                 
+                // Backpatch the end jump to point to end_label
+                backpatch(end_list, end_label);
+                freeJumpList(end_list);
+                
+                // Emit end label
                 emit("LABEL", end_label, "", "");
             }
             else if (strcmp(node->value, "switch") == 0) {
@@ -560,71 +572,98 @@ char* generate_ir(TreeNode* node) {
                 // Child 0: expression (condition)
                 // Child 1: statement (body)
                 
+                // Create labels
                 char* start_label = newLabel();
                 char* end_label = newLabel();
                 
-                pushLoopLabels(start_label, end_label);
-                
+                // Emit start label
                 emit("LABEL", start_label, "", "");
                 
                 char* cond_result = generate_ir(node->children[0]);
-                if (cond_result) {
-                    emit("IF_FALSE_GOTO", cond_result, end_label, "");
-                }
+                
+                // Emit conditional jump with end label (not placeholder)
+                int false_jump_index = emitWithIndex("IF_FALSE_GOTO", cond_result, end_label, "");
+                
+                // Push loop context with label names
+                pushLoopLabels(start_label, end_label);
                 
                 // Loop body
                 if (node->childCount > 1) {
                     generate_ir(node->children[1]);
                 }
                 
+                // Emit unconditional jump back to start
                 emit("GOTO", start_label, "", "");
+                
+                // Get break list and backpatch to end_label
+                JumpList* break_list = (loopDepth > 0) ? break_lists[loopDepth - 1] : NULL;
+                backpatch(break_list, end_label);
+                freeJumpList(break_list);
+                
+                // Clear break list before popping
+                if (loopDepth > 0) {
+                    break_lists[loopDepth - 1] = NULL;
+                }
+                
+                // Emit end label
                 emit("LABEL", end_label, "", "");
                 
                 popLoopLabels();
             }
             else if (strcmp(node->value, "do_while") == 0 || strcmp(node->value, "do_until") == 0) {
-                // FIX for Bug 2: Correct do-while logic
                 // AST from parser:
                 // Child 0: expression (condition)
                 // Child 1: marker
                 // Child 2: statement (body)
                 
+                // Create labels
                 char* start_label = newLabel();
-                char* test_label = newLabel();  // New label for the condition test
+                char* test_label = newLabel();
                 char* end_label = newLabel();
                 
-                // 'continue' in do-while jumps to the test (test_label)
-                // 'break' jumps to the end (end_label)
-                pushLoopLabels(test_label, end_label); 
-                
+                // Emit start label
                 emit("LABEL", start_label, "", "");
+                
+                // Push loop context - continue goes to test, break goes to end
+                pushLoopLabels(test_label, end_label);
                 
                 // Loop body (Child 2)
                 if (node->childCount > 2) {
-                    generate_ir(node->children[2]); // This will generate the printf AND k++
+                    generate_ir(node->children[2]);
                 }
                 
-                // 'continue' statements will jump here
-                emit("LABEL", test_label, "", ""); 
+                // Emit test label (continue jumps here)
+                emit("LABEL", test_label, "", "");
                 
                 // Condition (Child 0)
                 char* cond_result = NULL;
                 if (node->childCount > 0) { 
-                    cond_result = generate_ir(node->children[0]); // This generates (k < 3)
+                    cond_result = generate_ir(node->children[0]);
                 }
                 
                 if (cond_result) {
                     if (strcmp(node->value, "do_while") == 0) {
-                        // if (k < 3) is true, go back to start
+                        // if condition is true, go back to start
                         emit("IF_TRUE_GOTO", cond_result, start_label, "");
                     } else {
-                        // if (k < 3) is false, go back to start
+                        // if condition is false, go back to start
                         emit("IF_FALSE_GOTO", cond_result, start_label, "");
                     }
                 }
                 
-                // 'break' statements will jump here
+                // Get break list and backpatch to end_label
+                JumpList* break_list = (loopDepth > 0) ? break_lists[loopDepth - 1] : NULL;
+                backpatch(break_list, end_label);
+                freeJumpList(break_list);
+                
+                // Clear break list before popping
+                if (loopDepth > 0) {
+                    break_lists[loopDepth - 1] = NULL;
+                }
+                
+                // Emit end label
                 emit("LABEL", end_label, "", "");
+                
                 popLoopLabels();
             }
             else if (strcmp(node->value, "for") == 0) {
@@ -633,26 +672,24 @@ char* generate_ir(TreeNode* node) {
                 // Child 2: increment
                 // Child 3: body
                 
-                char* cond_label = newLabel();
-                char* incr_label = newLabel();
-                char* end_label = newLabel();
-                
                 // Init - handle both declarations and expressions
                 if (node->childCount > 0 && node->children[0]) {
-                    // Check if it's not an empty expression statement
                     if (!(node->children[0]->type == NODE_EXPRESSION_STATEMENT && 
                           (!node->children[0]->value || strlen(node->children[0]->value) == 0))) {
                         generate_ir(node->children[0]);
                     }
                 }
                 
-                emit("LABEL", cond_label, "", "");
+                // Create labels
+                char* cond_label = newLabel();
+                char* incr_label = newLabel();
+                char* end_label = newLabel();
                 
-                pushLoopLabels(incr_label, end_label);
+                // Emit condition label
+                emit("LABEL", cond_label, "", "");
                 
                 // Condition - handle empty condition (infinite loop)
                 if (node->childCount > 1 && node->children[1]) {
-                    // Check if condition is not empty
                     if (!(node->children[1]->type == NODE_EXPRESSION_STATEMENT && 
                           (!node->children[1]->value || strlen(node->children[1]->value) == 0))) {
                         char* cond_result = generate_ir(node->children[1]);
@@ -660,26 +697,41 @@ char* generate_ir(TreeNode* node) {
                             emit("IF_FALSE_GOTO", cond_result, end_label, "");
                         }
                     }
-                    // If condition is empty, no conditional jump - infinite loop until break
                 }
+                
+                // Push loop context - continue goes to increment, break goes to end
+                pushLoopLabels(incr_label, end_label);
                 
                 // Body
                 if (node->childCount > 3) {
                     generate_ir(node->children[3]);
                 }
                 
+                // Emit increment label
                 emit("LABEL", incr_label, "", "");
                 
                 // Increment - handle empty increment
                 if (node->childCount > 2 && node->children[2]) {
-                    // Check if increment is not empty
                     if (!(node->children[2]->type == NODE_EXPRESSION_STATEMENT && 
                           (!node->children[2]->value || strlen(node->children[2]->value) == 0))) {
                         generate_ir(node->children[2]);
                     }
                 }
                 
+                // Jump back to condition
                 emit("GOTO", cond_label, "", "");
+                
+                // Get break list and backpatch to end_label
+                JumpList* break_list = (loopDepth > 0) ? break_lists[loopDepth - 1] : NULL;
+                backpatch(break_list, end_label);
+                freeJumpList(break_list);
+                
+                // Clear break list before popping
+                if (loopDepth > 0) {
+                    break_lists[loopDepth - 1] = NULL;
+                }
+                
+                // Emit end label
                 emit("LABEL", end_label, "", "");
                 
                 popLoopLabels();
@@ -698,15 +750,24 @@ char* generate_ir(TreeNode* node) {
                 char* continue_label = getCurrentLoopContinue();
                 if (continue_label) {
                     emit("GOTO", continue_label, "", "");
+                } else {
+                    cerr << "Error: continue statement outside loop" << endl;
                 }
             }
             else if (strcmp(node->value, "break") == 0) {
-                char* break_label = getCurrentLoopBreak();
-                if (!break_label) {
-                    break_label = getCurrentSwitchEnd();
-                }
-                if (break_label) {
-                    emit("GOTO", break_label, "", "");
+                // Check if we're in a loop or switch
+                if (loopDepth > 0) {
+                    // Emit break with placeholder and add to current loop's break list
+                    int break_jump_index = emitWithIndex("GOTO", "0", "", "");
+                    addBreakJump(break_jump_index);
+                } else {
+                    char* break_label = getCurrentSwitchEnd();
+                    if (break_label) {
+                        // For switch statements, use label directly
+                        emit("GOTO", break_label, "", "");
+                    } else {
+                        cerr << "Error: break statement outside loop or switch" << endl;
+                    }
                 }
             }
             else if (strcmp(node->value, "return") == 0) {
@@ -1127,7 +1188,7 @@ char* generate_ir(TreeNode* node) {
             // Implement proper short-circuit evaluation with support for nested && expressions
             char* true_label = newLabel();
             char* end_label = newLabel();
-            char* result_temp = NULL;  // Will be assigned in each branch
+            char* result_temp = newTemp();  // Create ONE result temp for all branches
             
             // Helper function to generate short-circuit code for left side
             // If left is a NODE_LOGICAL_AND_EXPRESSION, we need special handling
@@ -1155,7 +1216,6 @@ char* generate_ir(TreeNode* node) {
                 emitConditionalJump("IF_FALSE_GOTO", b_result, false_label, b_type);
                 
                 // Both A and B were true, so the OR is true
-                result_temp = newTemp();
                 emit("ASSIGN", "1", "", result_temp);
                 emit("GOTO", end_label, "", "");
                 
@@ -1167,13 +1227,11 @@ char* generate_ir(TreeNode* node) {
                 emitConditionalJump("IF_TRUE_GOTO", right, true_label, rightType);
                 
                 // C was also false
-                result_temp = newTemp();
                 emit("ASSIGN", "0", "", result_temp);
                 emit("GOTO", end_label, "", "");
                 
                 // true_label: C was true
                 emit("LABEL", true_label, "", "");
-                result_temp = newTemp();
                 emit("ASSIGN", "1", "", result_temp);
                 
                 emit("LABEL", end_label, "", "");
@@ -1196,13 +1254,11 @@ char* generate_ir(TreeNode* node) {
                 emitConditionalJump("IF_TRUE_GOTO", right, true_label, rightType);
                 
                 // 5. Both were false: assign 0
-                result_temp = newTemp();
                 emit("ASSIGN", "0", "", result_temp);
                 emit("GOTO", end_label, "", "");
                 
                 // 6. True label: assign 1
                 emit("LABEL", true_label, "", "");
-                result_temp = newTemp();
                 emit("ASSIGN", "1", "", result_temp);
                 
                 // 7. End label
@@ -1219,7 +1275,7 @@ char* generate_ir(TreeNode* node) {
             // Implement proper short-circuit evaluation  
             char* false_label = newLabel();
             char* end_label = newLabel();
-            char* result_temp = NULL;  // Will be assigned in each branch
+            char* result_temp = newTemp();  // Create ONE result temp for all branches
             
             // 1. Evaluate left side
             char* left = generate_ir(node->children[0]);
@@ -1238,13 +1294,11 @@ char* generate_ir(TreeNode* node) {
             emitConditionalJump("IF_FALSE_GOTO", right, false_label, rightType);
             
             // 5. Both were true: assign 1
-            result_temp = newTemp();
             emit("ASSIGN", "1", "", result_temp);
             emit("GOTO", end_label, "", "");
             
             // 6. False label: assign 0
             emit("LABEL", false_label, "", "");
-            result_temp = newTemp();
             emit("ASSIGN", "0", "", result_temp);
             
             // 7. End label
@@ -1420,19 +1474,11 @@ char* generate_ir(TreeNode* node) {
             
             if (strcmp(node->value, "+") == 0) {
                 if (is_pointer_arithmetic) {
-                    // For pointer arithmetic, use address computation instead of type casting
-                    // For arrays, use address of first element
-                    if (isArrayType(node->children[0]->dataType)) {
-                        char* addr_temp = newTemp();
-                        emit("ADDR", left, "", addr_temp);  // Get address of array start
-                        char* temp = newTemp();
-                        emit("PTR_ADD", addr_temp, right, temp);  // Proper pointer arithmetic
-                        return temp;
-                    } else {
-                        char* temp = newTemp();
-                        emit("PTR_ADD", left, right, temp);  // Proper pointer arithmetic
-                        return temp;
-                    }
+                    // For pointer arithmetic, arrays decay to pointer to first element
+                    // No need to take address - array name itself decays to pointer
+                    char* temp = newTemp();
+                    emit("PTR_ADD", left, right, temp);  // Proper pointer arithmetic
+                    return temp;
                 } else {
                     // Handle regular arithmetic type conversions
                     if (node->children[0]->dataType && node->children[1]->dataType) {
@@ -2082,6 +2128,7 @@ char* generate_ir(TreeNode* node) {
             if (node->childCount > 1 && strcmp(node->value, "=") == 0) {
                 // Child 0: declarator (e.g., NODE_IDENTIFIER "j")
                 // Child 1: initializer (e.g., NODE_INTEGER_CONSTANT "0" or initializer list)
+                // Child 2+: additional init_declarators (for comma-separated declarations)
                 
                 TreeNode* declarator = node->children[0];
                 char* lhs_name = NULL;
@@ -2115,6 +2162,12 @@ char* generate_ir(TreeNode* node) {
                     registerStaticVar(static_var_name, init_value ? init_value : "0");
                     
                     free(static_var_name);
+                    
+                    // Process additional init_declarators in the list (child 2+)
+                    for (int i = 2; i < node->childCount; i++) {
+                        generate_ir(node->children[i]);
+                    }
+                    
                     return lhs_name;
                 }
                 
@@ -2155,6 +2208,12 @@ char* generate_ir(TreeNode* node) {
                             emit("ASSIGN_ARRAY", index_str, lhs_name, value);
                         }
                     }
+                    
+                    // Process additional init_declarators in the list (child 2+)
+                    for (int i = 2; i < node->childCount; i++) {
+                        generate_ir(node->children[i]);
+                    }
+                    
                     return lhs_name;
                 } else {
                     // Simple initialization (including function calls, pointer initialization, etc.)
@@ -2168,8 +2227,14 @@ char* generate_ir(TreeNode* node) {
                             rhs_result = convertType(rhs_result, rhs->dataType, sym->type);
                         }
                         emit("ASSIGN", rhs_result, "", lhs_name);
-                        return lhs_name;
                     }
+                    
+                    // Process additional init_declarators in the list (child 2+)
+                    for (int i = 2; i < node->childCount; i++) {
+                        generate_ir(node->children[i]);
+                    }
+                    
+                    return lhs_name;
                 }
             } 
             // Handle other initializer forms (like lists) if you have them
