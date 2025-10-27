@@ -8,6 +8,16 @@ extern "C" {
 #define MAX_IR_SIZE 10000
 #define MAX_STATIC_VARS 500
 
+// Backpatching data structures
+typedef struct JumpListNode {
+    int quad_index;
+    struct JumpListNode* next;
+} JumpListNode;
+
+typedef struct {
+    JumpListNode* head;
+} JumpList;
+
 // Structure to track static variables for initialization
 typedef struct {
     char name[256];           // Full name (e.g., "static_function.local_static")
@@ -34,11 +44,19 @@ extern int staticVarCount;
 
 // Function prototypes
 void emit(const char* op, const char* arg1, const char* arg2, const char* result);
+int emitWithIndex(const char* op, const char* arg1, const char* arg2, const char* result);
 char* newTemp();
 char* newLabel();
+int nextQuad();
 void printIR(const char* filename);
 void registerStaticVar(const char* name, const char* init_value);
 void emitStaticVarInitializations();
+
+// Backpatching functions
+JumpList* makelist(int quad_index);
+JumpList* merge(JumpList* list1, JumpList* list2);
+void backpatch(JumpList* list, const char* target_label);
+void freeJumpList(JumpList* list);
 
 #ifdef __cplusplus
 }
