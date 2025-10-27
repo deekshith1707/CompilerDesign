@@ -12,8 +12,8 @@ char* generate_ir(TreeNode* node);
 
 // Helper structure for control flow
 typedef struct {
-    char* continue_label;
-    char* break_label;
+    char* continue_label;  // Changed back to char* for label names
+    char* break_label;     // Changed back to char* for label names
 } LoopContext;
 
 typedef struct {
