@@ -27,8 +27,10 @@ int param_count_temp = 0;  // Temporary counter for function parameters
 int parsing_function_decl = 0;  // Flag to indicate we're parsing a function declaration
 int in_function_definition = 0;  // Flag to indicate we're parsing a function definition (not just a declaration)
 char function_return_type[128] = "int";  // Save function return type before parsing parameters
+char saved_declaration_type[128] = "int";  // Save type from declaration_specifiers before declarator parsing
 int loop_depth = 0;  // Track nesting depth of loops (for break/continue validation)
 int switch_depth = 0;  // Track nesting depth of switch statements (for break validation)
+int parsing_parameters = 0;  // Flag to indicate we're parsing function/function pointer parameters
 
 // Structure to track goto statements for validation
 typedef struct {
@@ -61,6 +63,7 @@ int isFunctionDeclarator(TreeNode* node);
 int hasParameterListDescendant(TreeNode* node);
 int extractArrayDimensions(TreeNode* node, int* dims, int maxDims);
 int hasArrayBrackets(TreeNode* node);
+const char* extractTypeFromSpecifiers(TreeNode* node);  // Forward declaration for function pointer type building
 
 // Helper function to check if a node is an lvalue
 int isLValue(TreeNode* node) {
@@ -251,11 +254,84 @@ int countArrayDimensions(TreeNode* node) {
 }
 
 // Helper function to build function pointer type string
+// Helper function to extract parameter types from a parameter list node
+void extractParameterTypes(TreeNode* paramList, char* dest) {
+    if (!paramList || paramList->type != NODE_PARAMETER_LIST) {
+        return;
+    }
+    
+    // Iterate through parameter children
+    for (int i = 0; i < paramList->childCount; i++) {
+        TreeNode* param = paramList->children[i];
+        if (!param || param->type != NODE_PARAMETER_DECLARATION) continue;
+        
+        if (i > 0) {
+            strcat(dest, ", ");
+        }
+        
+        // Extract the type from declaration_specifiers (first child)
+        if (param->childCount > 0) {
+            TreeNode* declSpecs = param->children[0];
+            const char* baseType = extractTypeFromSpecifiers(declSpecs);
+            
+            if (baseType) {
+                strcat(dest, baseType);
+                
+                // Check if there's a declarator (second child) for pointers/references
+                if (param->childCount > 1) {
+                    TreeNode* declarator = param->children[1];
+                    
+                    // Check for pointers
+                    int ptrCount = countPointerLevels(declarator);
+                    for (int p = 0; p < ptrCount; p++) {
+                        // Check if it's a reference or pointer
+                        if (isReferenceNode(declarator)) {
+                            strcat(dest, " &");
+                            break;  // Only one reference allowed
+                        } else {
+                            strcat(dest, " *");
+                        }
+                    }
+                    
+                    // Check for references specifically
+                    int refCount = countReferenceLevels(declarator);
+                    if (refCount > 0 && ptrCount == 0) {
+                        strcat(dest, " &");
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Helper function to find parameter list in a declarator tree
+TreeNode* findParameterList(TreeNode* node) {
+    if (!node) return NULL;
+    if (node->type == NODE_PARAMETER_LIST) return node;
+    
+    // Recursively search children
+    for (int i = 0; i < node->childCount; i++) {
+        TreeNode* found = findParameterList(node->children[i]);
+        if (found) return found;
+    }
+    return NULL;
+}
+
 void buildFunctionPointerType(char* dest, const char* returnType, TreeNode* declarator) {
-    // For now, build a simplified function pointer type
+    // Build complete function pointer type using pending_params
     // Format: "returnType (*)(param_types...)"
     strcpy(dest, returnType);
-    strcat(dest, " (*)()");  // Simplified - would need to extract parameter types
+    strcat(dest, " (*)(");
+    
+    // Use the pending_params array that was populated during parsing
+    for (int i = 0; i < pending_param_count; i++) {
+        if (i > 0) {
+            strcat(dest, ", ");
+        }
+        strcat(dest, pending_params[i].type);
+    }
+    
+    strcat(dest, ")");
 }
 
 // Helper function to extract type from declaration_specifiers
@@ -853,10 +929,25 @@ declaration_specifiers:
         addChild($$, $1);
         // Don't overwrite function return type if we're inside parameter parsing
         // parsing_function_decl will be set by function_definition rule
+        // Store the current type in the node's dataType field AND save it globally
+        $$->dataType = strdup(currentType);
+        // Only save to saved_declaration_type if we're NOT parsing function pointer parameters
+        if (!parsing_parameters) {
+            strncpy(saved_declaration_type, currentType, sizeof(saved_declaration_type) - 1);
+            saved_declaration_type[sizeof(saved_declaration_type) - 1] = '\0';
+        }
     }
     | declaration_specifiers specifier {
         $$ = $1;
         addChild($$, $2);
+        // Update the dataType field with the current type AND save it globally
+        if ($$->dataType) free($$->dataType);
+        $$->dataType = strdup(currentType);
+        // Only save to saved_declaration_type if we're NOT parsing function pointer parameters
+        if (!parsing_parameters) {
+            strncpy(saved_declaration_type, currentType, sizeof(saved_declaration_type) - 1);
+            saved_declaration_type[sizeof(saved_declaration_type) - 1] = '\0';
+        }
     }
     ;
 
@@ -1104,6 +1195,12 @@ init_declarator_list:
 init_declarator:
     declarator {
         const char* varName = extractIdentifierName($1);
+        
+        // Use the saved declaration type (saved before parsing declarator)
+        char savedCurrentType[256];
+        strncpy(savedCurrentType, saved_declaration_type, 255);
+        savedCurrentType[255] = '\0';
+        
         // Skip insertion for function declarators, but not for function pointers
         // Function pointers have parameters AND a pointer level > 0
         int ptrLevel = countPointerLevels($1);
@@ -1151,13 +1248,13 @@ init_declarator:
             
             char fullType[256];
             if (isFuncPtr) {
-                // Build function pointer type
-                buildFunctionPointerType(fullType, currentType, $1);
+                // Build function pointer type using saved return type
+                buildFunctionPointerType(fullType, savedCurrentType, $1);
             } else if (isRef) {
                 // Build type with reference
-                buildFullTypeWithRefs(fullType, currentType, $1);
+                buildFullTypeWithRefs(fullType, savedCurrentType, $1);
             } else {
-                buildFullType(fullType, currentType, ptrLevel);
+                buildFullType(fullType, savedCurrentType, ptrLevel);
             }
             
             if (in_typedef) {
@@ -1187,6 +1284,12 @@ init_declarator:
     }
     | declarator ASSIGN initializer {
         const char* varName = extractIdentifierName($1);
+        
+        // Use the saved declaration type (saved before parsing declarator)
+        char savedCurrentType[256];
+        strncpy(savedCurrentType, saved_declaration_type, 255);
+        savedCurrentType[255] = '\0';
+        
         if (varName && !in_typedef) {
             // ERROR A: Check for redeclaration of typedef name as variable
             // Check if varName is already a typedef in current or outer scope
@@ -1250,7 +1353,7 @@ init_declarator:
                     int initCount = countInitializerElements($3);
                     if (initCount > arrayDims[0]) {
                         char fullType[256];
-                        buildFullType(fullType, currentType, ptrLevel);
+                        buildFullType(fullType, savedCurrentType, ptrLevel);
                         type_error(yylineno, "too many initializers for '%s[%d]'", 
                                   fullType, arrayDims[0]);
                     }
@@ -1260,13 +1363,13 @@ init_declarator:
             
             char fullType[256];
             if (isFuncPtr) {
-                // Build function pointer type
-                buildFunctionPointerType(fullType, currentType, $1);
+                // Build function pointer type using saved return type
+                buildFunctionPointerType(fullType, savedCurrentType, $1);
             } else if (isRef) {
                 // Build type with reference
-                buildFullTypeWithRefs(fullType, currentType, $1);
+                buildFullTypeWithRefs(fullType, savedCurrentType, $1);
             } else {
-                buildFullType(fullType, currentType, ptrLevel);
+                buildFullType(fullType, savedCurrentType, ptrLevel);
             }
             
             // Type check initialization for function pointers
@@ -1413,8 +1516,9 @@ direct_declarator:
         param_count_temp = 0;  // No parameters
         pending_param_count = 0; // Reset for empty parameter list
     }
-    | direct_declarator LPAREN { param_count_temp = 0; pending_param_count = 0; } parameter_type_list RPAREN {
+    | direct_declarator LPAREN { param_count_temp = 0; pending_param_count = 0; parsing_parameters = 1; } parameter_type_list RPAREN {
         $$ = $1;
+        parsing_parameters = 0;  // Reset flag after parsing parameters
     }
     ;
 
@@ -1490,6 +1594,27 @@ parameter_declaration:
         $$ = createNode(NODE_PARAMETER_DECLARATION, "param");
         addChild($$, $1);
         addChild($$, $2);
+        
+        // Extract type information for function pointers
+        if (pending_param_count < 32) {
+            int refLevel = countReferenceLevels($2);
+            int ptrLevel = countPointerLevels($2);
+            int isRef = (refLevel > 0);
+            int totalPtrLevel = ptrLevel;
+            
+            char fullType[256];
+            if (isRef) {
+                buildFullTypeWithRefs(fullType, currentType, $2);
+            } else {
+                buildFullType(fullType, currentType, totalPtrLevel);
+            }
+            
+            strncpy(pending_params[pending_param_count].name, "", 255);  // No name for abstract declarator
+            strncpy(pending_params[pending_param_count].type, fullType, 255);
+            pending_params[pending_param_count].ptrLevel = totalPtrLevel;
+            pending_params[pending_param_count].isReference = isRef;
+        }
+        
         // Also count parameters without names (for function pointers)
         pending_param_count++;
     }
@@ -1500,6 +1625,15 @@ parameter_declaration:
         }
         
         $$ = $1;
+        
+        // Extract type information for function pointers (plain type, no pointer/reference)
+        if (pending_param_count < 32) {
+            strncpy(pending_params[pending_param_count].name, "", 255);
+            strncpy(pending_params[pending_param_count].type, currentType, 255);
+            pending_params[pending_param_count].ptrLevel = 0;
+            pending_params[pending_param_count].isReference = 0;
+        }
+        
         // Also count parameters with just type (for function pointers)
         pending_param_count++;
     }
