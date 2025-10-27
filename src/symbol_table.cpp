@@ -35,6 +35,21 @@ int unionCount = 0;
 char function_pointers[MAX_SYMBOLS][128];
 int function_pointer_count = 0;
 
+// Helper: Format function pointer type string
+void formatFunctionPointerType(Symbol* sym, char* out, int out_size) {
+    snprintf(out, out_size, "%s (*)(", sym->return_type);
+    int len = strlen(out);
+    for (int i = 0; i < sym->param_count; i++) {
+        if (i > 0) {
+            strncat(out, ", ", out_size - len - 1);
+            len = strlen(out);
+        }
+        strncat(out, sym->param_types[i], out_size - len - 1);
+        len = strlen(out);
+    }
+    strncat(out, ")", out_size - len - 1);
+}
+
 void insertStruct(const char* name, StructMember* members, int member_count) {
     if (structCount >= MAX_STRUCTS) {
         cerr << "Error: Struct table overflow" << endl;
@@ -304,6 +319,12 @@ void insertVariable(const char* name, const char* type, int is_array, int* dims,
         } else {
             strcpy(symtab[symCount].kind, "variable");
         }
+    } else if (strcmp(type, "function_pointer") == 0) {
+        // Format function pointer type string
+        char fp_type[256];
+        formatFunctionPointerType(&symtab[symCount], fp_type, sizeof(fp_type));
+        strcpy(symtab[symCount].type, fp_type);
+        strcpy(symtab[symCount].kind, "function_pointer");
     } else {
         strcpy(symtab[symCount].type, type);
         if (is_static) {

@@ -262,8 +262,24 @@ static void find_case_labels(TreeNode* node, std::vector<CaseLabel>& cases, char
 static char* convertType(char* place, const char* from_type, const char* to_type) {
     if (strcmp(from_type, to_type) == 0) return place;
     char* temp = newTemp();
-    char cast_op[64];
-    sprintf(cast_op, "CAST_%s_to_%s", from_type, to_type);
+    char cast_op[128];
+    // Sanitize function pointer type strings for IR output
+    auto sanitize_type = [](const char* t, char* out, int out_size) {
+        int j = 0;
+        for (int i = 0; t[i] && j < out_size - 1; i++) {
+            char c = t[i];
+            if (c == ' ' || c == '*' || c == '&' || c == '(' || c == ')' || c == ',') {
+                out[j++] = '_';
+            } else {
+                out[j++] = c;
+            }
+        }
+        out[j] = '\0';
+    };
+    char from_buf[64], to_buf[64];
+    sanitize_type(from_type, from_buf, sizeof(from_buf));
+    sanitize_type(to_type, to_buf, sizeof(to_buf));
+    sprintf(cast_op, "CAST_%s_to_%s", from_buf, to_buf);
     emit(cast_op, place, "", temp);
     return temp;
 }
