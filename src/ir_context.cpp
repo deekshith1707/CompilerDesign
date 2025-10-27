@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <string>
+#include <cctype>
 
 using namespace std;
 
@@ -30,6 +31,24 @@ void emit(const char* op, const char* arg1, const char* arg2, const char* result
     irCount++;
 }
 
+// New function: emit and return the index
+int emitWithIndex(const char* op, const char* arg1, const char* arg2, const char* result) {
+    if (irCount >= MAX_IR_SIZE) {
+        cerr << "Error: IR size limit exceeded" << endl;
+        return -1;
+    }
+    strcpy(IR[irCount].op, op);
+    strcpy(IR[irCount].arg1, arg1 ? arg1 : "");
+    strcpy(IR[irCount].arg2, arg2 ? arg2 : "");
+    strcpy(IR[irCount].result, result ? result : "");
+    return irCount++;
+}
+
+// Return the next available quad index
+int nextQuad() {
+    return irCount;
+}
+
 char* newTemp() {
     static char temp[16];
     sprintf(temp, "t%d", tempCount++);
@@ -40,6 +59,64 @@ char* newLabel() {
     static char label[32];
     sprintf(label, "L%d", labelCount++);
     return strdup(label);
+}
+
+// Backpatching functions
+JumpList* makelist(int quad_index) {
+    JumpList* list = (JumpList*)malloc(sizeof(JumpList));
+    JumpListNode* node = (JumpListNode*)malloc(sizeof(JumpListNode));
+    node->quad_index = quad_index;
+    node->next = NULL;
+    list->head = node;
+    return list;
+}
+
+JumpList* merge(JumpList* list1, JumpList* list2) {
+    if (!list1) return list2;
+    if (!list2) return list1;
+    
+    // Find the end of list1
+    JumpListNode* current = list1->head;
+    while (current->next != NULL) {
+        current = current->next;
+    }
+    
+    // Append list2
+    current->next = list2->head;
+    free(list2);  // Free the list structure, but keep the nodes
+    
+    return list1;
+}
+
+void backpatch(JumpList* list, const char* target_label) {
+    if (!list) return;
+    
+    JumpListNode* current = list->head;
+    while (current != NULL) {
+        int index = current->quad_index;
+        if (index >= 0 && index < irCount) {
+            // For GOTO, update arg1; for conditional jumps, update arg2
+            if (strcmp(IR[index].op, "GOTO") == 0) {
+                strcpy(IR[index].arg1, target_label);
+            } else {
+                // Conditional jumps like IF_FALSE_GOTO, IF_TRUE_GOTO
+                strcpy(IR[index].arg2, target_label);
+            }
+        }
+        current = current->next;
+    }
+}
+
+void freeJumpList(JumpList* list) {
+    if (!list) return;
+    
+    JumpListNode* current = list->head;
+    while (current != NULL) {
+        JumpListNode* temp = current;
+        current = current->next;
+        free(temp);
+    }
+    free(list);
 }
 
 void registerStaticVar(const char* name, const char* init_value) {
