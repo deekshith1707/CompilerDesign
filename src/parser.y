@@ -2457,8 +2457,14 @@ unary_expression:
         addChild($$, $2);
         $$->dataType = $2->dataType ? strdup($2->dataType) : NULL;
         
-        // Compute the negated value if the operand is a constant
-        if ($2->value) {
+        // Compute the negated value ONLY if the operand is a constant literal
+        if ($2->value && 
+            ($2->type == NODE_CONSTANT || 
+             $2->type == NODE_INTEGER_CONSTANT ||
+             $2->type == NODE_HEX_CONSTANT ||
+             $2->type == NODE_OCTAL_CONSTANT ||
+             $2->type == NODE_BINARY_CONSTANT ||
+             $2->type == NODE_FLOAT_CONSTANT)) {
             int val = atoi($2->value);
             char negVal[32];
             snprintf(negVal, sizeof(negVal), "%d", -val);
