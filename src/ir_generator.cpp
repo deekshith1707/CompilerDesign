@@ -13,6 +13,16 @@ using namespace std;
 // Track current function name for static variable naming
 static char current_function_name[256] = "";
 
+// Helper function to check if a variable is a reference parameter
+static int isReferenceVariable(const char* var_name) {
+    extern Symbol symtab[];
+    extern int symCount;
+    extern Symbol* lookupSymbol(const char* name);
+    
+    Symbol* sym = lookupSymbol(var_name);
+    return (sym && sym->is_reference);
+}
+
 // Helper function to check if a variable is static
 static int isStaticVariable(const char* var_name) {
     // During IR generation, scope context is not maintained the same way as during parsing
@@ -315,6 +325,13 @@ char* generate_ir(TreeNode* node) {
             // For static variables, return the full name
             if (isStaticVariable(node->value)) {
                 return getStaticVarName(node->value);
+            }
+            
+            // For reference variables, emit LOAD to dereference
+            if (isReferenceVariable(node->value)) {
+                char* temp = newTemp();
+                emit("LOAD", node->value, "", temp);
+                return temp;
             }
             
             // Return the identifier name itself
@@ -792,7 +809,13 @@ char* generate_ir(TreeNode* node) {
                     if (isStaticVariable(lhs_name)) {
                         lhs_name = getStaticVarName(lhs_name);
                     }
-                    emit("ASSIGN", rhs_result, "", lhs_name);
+                    
+                    // For reference variables, emit STORE instead of ASSIGN
+                    if (isReferenceVariable(lhs_name)) {
+                        emit("STORE", rhs_result, "", lhs_name);
+                    } else {
+                        emit("ASSIGN", rhs_result, "", lhs_name);
+                    }
                     return lhs_name;
                 }
                 else if (lhs->type == NODE_POSTFIX_EXPRESSION && strcmp(lhs->value, ".") == 0) {
@@ -1663,21 +1686,133 @@ char* generate_ir(TreeNode* node) {
                     }
                     
                     // Step 2: Now emit all PARAM instructions in order
+                    // Check if function has reference parameters
+                    extern Symbol* lookupSymbol(const char* name);
+                    Symbol* func_sym = NULL;
+                    const char* func_type = NULL;
+                    
+                    if (func_name && !is_function_pointer) {
+                        func_sym = lookupSymbol(func_name);
+                    } else if (func_name && is_function_pointer) {
+                        // For function pointers, look up the pointer variable to get type signature
+                        func_sym = lookupSymbol(func_name);
+                        if (func_sym) {
+                            func_type = func_sym->type;  // e.g., "void (*)(int &, char &, bool &)"
+                        }
+                    }
+                    
                     for (int i = 0; i < args->childCount && i < MAX_FUNC_ARGS; i++) {
                         char* arg = arg_results[i];
+                        int is_ref_param = 0;
                         
-                        // Handle float-to-double promotion for variadic functions like printf
-                        if (func_name && (strcmp(func_name, "printf") == 0 || 
-                                         strcmp(func_name, "fprintf") == 0 || 
-                                         strcmp(func_name, "sprintf") == 0) && 
-                            args->children[i]->dataType && 
-                            strcmp(args->children[i]->dataType, "float") == 0) {
-                            // Promote float to double for variadic functions
-                            char* promoted_arg = newTemp();
-                            emit("FLOAT_TO_DOUBLE", arg, "", promoted_arg);
-                            emit("PARAM", promoted_arg, "", "");
+                        // Check if this parameter is a reference
+                        if (func_sym && func_sym->is_function && i < func_sym->param_count) {
+                            // Direct function call - check param_types array
+                            const char* param_type = func_sym->param_types[i];
+                            if (strstr(param_type, " &") != NULL || strstr(param_type, "&") == param_type + strlen(param_type) - 1) {
+                                is_ref_param = 1;
+                            }
+                        } else if (func_type && is_function_pointer) {
+                            // Function pointer call - parse type signature
+                            // Type format: "returnType (*)(param1, param2, ...)"
+                            const char* params_start = strchr(func_type, '(');
+                            if (params_start) {
+                                params_start = strchr(params_start + 1, '(');  // Find second '(' for parameter list
+                                if (params_start) {
+                                    // Parse parameters to find the i-th one
+                                    const char* param_ptr = params_start + 1;
+                                    int param_idx = 0;
+                                    int paren_depth = 1;
+                                    const char* param_start = param_ptr;
+                                    
+                                    while (*param_ptr && paren_depth > 0) {
+                                        if (*param_ptr == '(') paren_depth++;
+                                        else if (*param_ptr == ')') {
+                                            paren_depth--;
+                                            if (paren_depth == 0) {
+                                                // End of parameter list
+                                                if (param_idx == i) {
+                                                    // Check if this parameter has '&'
+                                                    while (param_start < param_ptr && *param_start == ' ') param_start++;
+                                                    const char* param_end = param_ptr;
+                                                    while (param_end > param_start && (*(param_end-1) == ' ' || *(param_end-1) == ')')) param_end--;
+                                                    
+                                                    // Search for '&' in this parameter
+                                                    for (const char* p = param_start; p < param_end; p++) {
+                                                        if (*p == '&') {
+                                                            is_ref_param = 1;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                break;
+                                            }
+                                        } else if (*param_ptr == ',' && paren_depth == 1) {
+                                            // Found parameter separator
+                                            if (param_idx == i) {
+                                                // Check if this parameter has '&'
+                                                while (param_start < param_ptr && *param_start == ' ') param_start++;
+                                                const char* param_end = param_ptr;
+                                                while (param_end > param_start && *(param_end-1) == ' ') param_end--;
+                                                
+                                                // Search for '&' in this parameter
+                                                for (const char* p = param_start; p < param_end; p++) {
+                                                    if (*p == '&') {
+                                                        is_ref_param = 1;
+                                                        break;
+                                                    }
+                                                }
+                                                break;
+                                            }
+                                            param_idx++;
+                                            param_start = param_ptr + 1;
+                                        }
+                                        param_ptr++;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // For reference parameters, pass address; for others, pass value
+                        if (is_ref_param) {
+                            // Pass address of argument
+                            char* addr_temp = newTemp();
+                            emit("ADDR", arg, "", addr_temp);
+                            emit("PARAM", addr_temp, "", "");
                         } else {
-                            emit("PARAM", arg, "", "");
+                            // For value parameters, ensure we load the current value
+                            // Check if arg is a simple variable (not already a temp or constant)
+                            int needs_load = 0;
+                            if (arg && arg[0] != 't' && !isdigit(arg[0]) && arg[0] != '\'' && arg[0] != '"') {
+                                // This looks like a variable name, not a temporary or constant
+                                // We should load it to get the current value
+                                extern Symbol* lookupSymbol(const char* name);
+                                Symbol* arg_sym = lookupSymbol(arg);
+                                if (arg_sym && !arg_sym->is_function) {
+                                    needs_load = 1;
+                                }
+                            }
+                            
+                            if (needs_load) {
+                                // Explicitly load the value into a temporary
+                                char* value_temp = newTemp();
+                                emit("ASSIGN", arg, "", value_temp);
+                                arg = value_temp;
+                            }
+                            
+                            // Handle float-to-double promotion for variadic functions like printf
+                            if (func_name && (strcmp(func_name, "printf") == 0 || 
+                                             strcmp(func_name, "fprintf") == 0 || 
+                                             strcmp(func_name, "sprintf") == 0) && 
+                                args->children[i]->dataType && 
+                                strcmp(args->children[i]->dataType, "float") == 0) {
+                                // Promote float to double for variadic functions
+                                char* promoted_arg = newTemp();
+                                emit("FLOAT_TO_DOUBLE", arg, "", promoted_arg);
+                                emit("PARAM", promoted_arg, "", "");
+                            } else {
+                                emit("PARAM", arg, "", "");
+                            }
                         }
                     }
                 }
