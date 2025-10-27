@@ -409,19 +409,19 @@ char* generate_ir(TreeNode* node) {
                 
                 // Skip declaration_specifiers (type info), process init_declarator_list
                 if (child && i > 0) {  // Skip first child which is usually declaration_specifiers
-                    // Check if this is an init_declarator_list or single init_declarator
-                    if (child->childCount > 0) {
-                        // Process all declarators in the list
+                    // Process this child (could be init_declarator or init_declarator_list)
+                    // If it's a NODE_INITIALIZER, generate IR for it
+                    if (child->type == NODE_INITIALIZER) {
+                        generate_ir(child);
+                    }
+                    // If it has children, they might be init_declarators in a list
+                    else if (child->childCount > 0) {
                         for (int j = 0; j < child->childCount; j++) {
                             TreeNode* declarator = child->children[j];
                             if (declarator && declarator->type == NODE_INITIALIZER) {
                                 generate_ir(declarator);
                             }
                         }
-                    }
-                    // Also process the main child if it's an initializer
-                    if (child->type == NODE_INITIALIZER) {
-                        generate_ir(child);
                     }
                 }
             }
@@ -1125,9 +1125,9 @@ char* generate_ir(TreeNode* node) {
         case NODE_LOGICAL_OR_EXPRESSION:
         {
             // Implement proper short-circuit evaluation with support for nested && expressions
-            char* result_temp = newTemp();
             char* true_label = newLabel();
             char* end_label = newLabel();
+            char* result_temp = NULL;  // Will be assigned in each branch
             
             // Helper function to generate short-circuit code for left side
             // If left is a NODE_LOGICAL_AND_EXPRESSION, we need special handling
@@ -1155,6 +1155,7 @@ char* generate_ir(TreeNode* node) {
                 emitConditionalJump("IF_FALSE_GOTO", b_result, false_label, b_type);
                 
                 // Both A and B were true, so the OR is true
+                result_temp = newTemp();
                 emit("ASSIGN", "1", "", result_temp);
                 emit("GOTO", end_label, "", "");
                 
@@ -1166,11 +1167,13 @@ char* generate_ir(TreeNode* node) {
                 emitConditionalJump("IF_TRUE_GOTO", right, true_label, rightType);
                 
                 // C was also false
+                result_temp = newTemp();
                 emit("ASSIGN", "0", "", result_temp);
                 emit("GOTO", end_label, "", "");
                 
                 // true_label: C was true
                 emit("LABEL", true_label, "", "");
+                result_temp = newTemp();
                 emit("ASSIGN", "1", "", result_temp);
                 
                 emit("LABEL", end_label, "", "");
@@ -1193,11 +1196,13 @@ char* generate_ir(TreeNode* node) {
                 emitConditionalJump("IF_TRUE_GOTO", right, true_label, rightType);
                 
                 // 5. Both were false: assign 0
+                result_temp = newTemp();
                 emit("ASSIGN", "0", "", result_temp);
                 emit("GOTO", end_label, "", "");
                 
                 // 6. True label: assign 1
                 emit("LABEL", true_label, "", "");
+                result_temp = newTemp();
                 emit("ASSIGN", "1", "", result_temp);
                 
                 // 7. End label
@@ -1212,9 +1217,9 @@ char* generate_ir(TreeNode* node) {
         case NODE_LOGICAL_AND_EXPRESSION:
         {
             // Implement proper short-circuit evaluation  
-            char* result_temp = newTemp();
             char* false_label = newLabel();
             char* end_label = newLabel();
+            char* result_temp = NULL;  // Will be assigned in each branch
             
             // 1. Evaluate left side
             char* left = generate_ir(node->children[0]);
@@ -1233,11 +1238,13 @@ char* generate_ir(TreeNode* node) {
             emitConditionalJump("IF_FALSE_GOTO", right, false_label, rightType);
             
             // 5. Both were true: assign 1
+            result_temp = newTemp();
             emit("ASSIGN", "1", "", result_temp);
             emit("GOTO", end_label, "", "");
             
             // 6. False label: assign 0
             emit("LABEL", false_label, "", "");
+            result_temp = newTemp();
             emit("ASSIGN", "0", "", result_temp);
             
             // 7. End label
@@ -1411,8 +1418,6 @@ char* generate_ir(TreeNode* node) {
                 }
             }
             
-            char* temp = newTemp();
-            
             if (strcmp(node->value, "+") == 0) {
                 if (is_pointer_arithmetic) {
                     // For pointer arithmetic, use address computation instead of type casting
@@ -1420,9 +1425,13 @@ char* generate_ir(TreeNode* node) {
                     if (isArrayType(node->children[0]->dataType)) {
                         char* addr_temp = newTemp();
                         emit("ADDR", left, "", addr_temp);  // Get address of array start
+                        char* temp = newTemp();
                         emit("PTR_ADD", addr_temp, right, temp);  // Proper pointer arithmetic
+                        return temp;
                     } else {
+                        char* temp = newTemp();
                         emit("PTR_ADD", left, right, temp);  // Proper pointer arithmetic
+                        return temp;
                     }
                 } else {
                     // Handle regular arithmetic type conversions
@@ -1435,14 +1444,20 @@ char* generate_ir(TreeNode* node) {
                             node->dataType = result_type;
                         }
                     }
+                    char* temp = newTemp();
                     emit("ADD", left, right, temp);
+                    return temp;
                 }
             } else if (strcmp(node->value, "-") == 0) {
                 if (is_ptr_ptr_subtraction) {
                     // Pointer-pointer subtraction: no type conversion needed
+                    char* temp = newTemp();
                     emit("PTR_SUB", left, right, temp);
+                    return temp;
                 } else if (is_pointer_arithmetic) {
+                    char* temp = newTemp();
                     emit("PTR_SUB", left, right, temp);  // Proper pointer arithmetic
+                    return temp;
                 } else {
                     // Handle regular arithmetic type conversions
                     if (node->children[0]->dataType && node->children[1]->dataType) {
@@ -1454,10 +1469,12 @@ char* generate_ir(TreeNode* node) {
                             node->dataType = result_type;
                         }
                     }
+                    char* temp = newTemp();
                     emit("SUB", left, right, temp);
+                    return temp;
                 }
             }
-            return temp;
+            return NULL;
         }
 
         case NODE_MULTIPLICATIVE_EXPRESSION:
@@ -1591,7 +1608,7 @@ char* generate_ir(TreeNode* node) {
                 // Unary plus - just return operand
                 return generate_ir(node->children[0]);
             }
-            else if (strcmp(node->value, "-") == 0) {
+            else if (strcmp(node->value, "-") == 0 || strcmp(node->value, "-_unary") == 0) {
                 // Unary minus
                 char* operand = generate_ir(node->children[0]);
                 char* temp = newTemp();
@@ -2141,7 +2158,7 @@ char* generate_ir(TreeNode* node) {
                     return lhs_name;
                 } else {
                     // Simple initialization (including function calls, pointer initialization, etc.)
-                    char* rhs_result = generate_ir(rhs); 
+                    char* rhs_result = generate_ir(rhs);
                     if (lhs_name && rhs_result) {
                         // Handle type conversion for initialization if needed
                         // Get the variable's type from symbol table
