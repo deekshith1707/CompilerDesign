@@ -1,0 +1,89 @@
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include "ast.h"
+#include "ir_generator.h"
+#include "ir_context.h"
+#include "symbol_table.h"
+#include "basic_block.h"
+
+using namespace std;
+
+extern int yyparse();
+extern FILE* yyin;
+extern int error_count;
+extern TreeNode* ast_root;
+
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        cerr << "Usage: " << argv[0] << " <input_file> [--analyze-blocks]" << endl;
+        cerr << "Options:" << endl;
+        cerr << "  --analyze-blocks  : Perform basic block analysis and print results" << endl;
+        return 1;
+    }
+    
+    // Check for optional flags
+    bool analyzeBlocks = false;
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--analyze-blocks") == 0) {
+            analyzeBlocks = true;
+        }
+    }
+    
+    yyin = fopen(argv[1], "r");
+    if (!yyin) {
+        cerr << "Error: Cannot open file " << argv[1] << endl;
+        return 1;
+    }
+
+    cout << "============================================" << endl;
+    cout << "  C Like Compiler - IR GENERATOR/SEMANTIC ANALYZER" << endl;
+    cout << "============================================" << endl;
+    cout << "Input file: " << argv[1] << endl;
+    cout << "============================================" << endl;
+    cout << endl;
+
+    if (yyparse() == 0 && error_count == 0) {
+        cout << "\n=== PARSING SUCCESSFUL ===" << endl;
+        printSymbolTable();
+        if (ast_root) {
+            cout << "\n=== GENERATING IR CODE ===" << endl;
+            generate_ir(ast_root);
+
+            string inputFile(argv[1]);
+            string outputFile;
+            size_t lastDot = inputFile.find_last_of('.');
+            if (lastDot != string::npos) {
+                outputFile = inputFile.substr(0, lastDot) + ".ir";
+            } else {
+                outputFile = inputFile + ".ir";
+            }
+            
+            printIR(outputFile.c_str());
+            cout << "\n=== CODE GENERATION COMPLETED ===" << endl;
+            
+            // Perform basic block analysis if requested
+            if (analyzeBlocks) {
+                cout << "\n=== PERFORMING BASIC BLOCK ANALYSIS ===" << endl;
+                analyzeIR();
+                printBasicBlocks();
+                printNextUseInfo();
+                cout << "\n=== BASIC BLOCK ANALYSIS COMPLETED ===" << endl;
+            }
+        } else {
+            cout << "\n=== PARSING SUCCEEDED BUT NO AST WAS GENERATED ===" << endl;
+        }
+
+    } else {
+        cout << "=== PARSING FAILED ===" << endl;
+        if (error_count > 0) {
+            cout << "Total errors: " << error_count << endl;
+        }
+    }
+
+    fclose(yyin);
+    return (error_count > 0) ? 1 : 0;
+}
