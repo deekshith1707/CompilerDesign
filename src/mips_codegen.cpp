@@ -969,8 +969,9 @@ void translateArithmetic(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
         // Binary operation: result = arg1 op arg2
         
         // Check if arg2 is a constant (can use immediate instruction)
-        if (isConstantValue(quad->arg2) && strcmp(quad->op, "ADD") == 0) {
-            // Use immediate instruction for ADD
+        // BUT: Only use addi for integer constants, not floats
+        if (isConstantValue(quad->arg2) && strcmp(quad->op, "ADD") == 0 && !isFloatConstant(quad->arg2)) {
+            // Use immediate instruction for ADD with integer constant
             regResult = getReg(codegen, quad->result, irIndex);
             sprintf(instr, "    addi %s, %s, %s", 
                    getRegisterName(regResult), 
@@ -1395,7 +1396,14 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     }
     else {
         // Regular function call - generate jal
-        sprintf(instr, "    jal %s", funcName);
+        // Add '_' prefix unless calling main (to avoid instruction name conflicts)
+        char jalTarget[128];
+        if (strcmp(funcName, "main") == 0) {
+            sprintf(jalTarget, "%s", funcName);
+        } else {
+            sprintf(jalTarget, "_%s", funcName);
+        }
+        sprintf(instr, "    jal %s", jalTarget);
         emitMIPS(codegen, instr);
         
         // If more than 4 params, restore stack pointer
@@ -1960,9 +1968,16 @@ void generateFunction(MIPSCodeGenerator* codegen, int funcStart, int funcEnd) {
     // Reset function call state
     codegen->currentParamCount = 0;
     
-    // Function label
+    // Function label - prefix with '_' to avoid conflicts with MIPS instructions
+    // (e.g., function 'add' would conflict with 'add' instruction)
     char label[128];
-    sprintf(label, "%s:", funcName);
+    if (strcmp(funcName, "main") == 0) {
+        // main should remain as 'main' for SPIM entry point
+        sprintf(label, "%s:", funcName);
+    } else {
+        // Other functions get '_' prefix to avoid instruction name conflicts
+        sprintf(label, "_%s:", funcName);
+    }
     emitMIPS(codegen, label);
     
     // Prologue
