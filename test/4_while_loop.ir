@@ -1,0 +1,182 @@
+# Three-Address Code (Intermediate Representation)
+# ================================================
+
+func_begin main
+    arr[0] = 1
+    arr[1] = 2
+    arr[2] = 3
+    arr[3] = 4
+    arr[4] = 5
+    arr[5] = 6
+    arr[6] = 7
+    arr[7] = 8
+    arr[8] = 9
+    arr[9] = 10
+    i = 0
+L0:
+    t0 = i < 10
+    if t0 == 0 goto L1
+    param "i = %d\n"
+    t1 = i
+    param t1
+    t2 = call printf, 2
+    t3 = i
+    t4 = i + 1
+    i = t4
+    goto L0
+L1:
+    i = 0
+L2:
+    t6 = i < 10
+    if t6 == 0 goto L4
+    t7 = arr[i]
+    t8 = t7 < 8
+    if t8 == 0 goto L4
+    t5 = 1
+    goto L5
+L4:
+    t5 = 0
+L5:
+    if t5 == 0 goto L3
+    t9 = arr[i]
+    param "arr[%d] = %d\n"
+    t10 = i
+    param t10
+    param t9
+    t11 = call printf, 3
+    t12 = i
+    t13 = i + 1
+    i = t13
+    goto L2
+L3:
+    f = 0.0
+L6:
+    t14 = f < 5.0
+    if t14 == 0 goto L7
+    param "f = %.1f\n"
+    t15 = f
+    t16 = (double)t15
+    param t16
+    t17 = call printf, 2
+    f = f + 0.5
+    goto L6
+L7:
+    ptr = arr
+L8:
+    t18 = arr + 5
+    t19 = ptr < t18
+    if t19 == 0 goto L9
+    t20 = *ptr
+    param "Value: %d\n"
+    param t20
+    t21 = call printf, 2
+    t22 = ptr
+    t23 = ptr + 1
+    ptr = t23
+    goto L8
+L9:
+    c = 'A'
+L10:
+    t24 = CAST_char_to_int(c)
+    t25 = CAST_char_to_int('E')
+    t26 = t24 <= t25
+    if t26 == 0 goto L11
+    param "Character: %c\n"
+    t27 = c
+    param t27
+    t28 = call printf, 2
+    t29 = c
+    t30 = c + 1
+    c = t30
+    goto L10
+L11:
+    i = 0
+L12:
+    t31 = i < 3
+    if t31 == 0 goto L13
+    j = 0
+L14:
+    t32 = j < 3
+    if t32 == 0 goto L15
+    param "i=%d, j=%d\n"
+    t33 = i
+    param t33
+    param j
+    t34 = call printf, 3
+    t35 = j
+    t36 = j + 1
+    j = t36
+    goto L14
+L15:
+    t37 = i
+    t38 = i + 1
+    i = t38
+    goto L12
+L13:
+    i = 0
+L16:
+    t39 = i < 10
+    if t39 == 0 goto L17
+    t40 = i
+    t41 = i + 1
+    i = t41
+    t42 = i == 3
+    if t42 == 0 goto L18
+    goto L16
+L18:
+    t43 = i == 7
+    if t43 == 0 goto L19
+    goto L17
+L19:
+    param "i = %d\n"
+    t44 = i
+    param t44
+    t45 = call printf, 2
+    goto L16
+L17:
+    count = 0
+L20:
+    if 1 == 0 goto L21
+    t46 = count
+    t47 = count + 1
+    count = t47
+    t48 = count > 5
+    if t48 == 0 goto L22
+    goto L21
+L22:
+    param "count = %d\n"
+    t49 = count
+    param t49
+    t50 = call printf, 2
+    goto L20
+L21:
+    i = 0
+L23:
+    t51 = i < 3
+    if t51 == 0 goto L24
+    t52 = i * 10
+    local_var = t52
+    param "Local: %d\n"
+    param local_var
+    t53 = call printf, 2
+    t54 = i
+    t55 = i + 1
+    i = t55
+    goto L23
+L24:
+    null_ptr = 0
+L25:
+    if null_ptr == 0 goto L26
+    goto L25
+L26:
+L27:
+    if "hello" == 0 goto L28
+    goto L27
+L28:
+L29:
+    if arr == 0 goto L30
+    goto L29
+L30:
+    return 0
+func_end main
+

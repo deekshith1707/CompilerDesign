@@ -1,0 +1,109 @@
+# Three-Address Code (Intermediate Representation)
+# ================================================
+
+func_begin main
+    i = 42
+    f = 3.14159
+    c = 'A'
+    str[0] = 'H'
+    str[1] = 'e'
+    str[2] = 'l'
+    str[3] = 'l'
+    str[4] = 'o'
+    str[5] = '\0'
+    t0 = &i
+    ptr = t0
+    param "Integer: %d\n"
+    t1 = i
+    param t1
+    t2 = call printf, 2
+    param "Float: %f\n"
+    t3 = f
+    t4 = (double)t3
+    param t4
+    t5 = call printf, 2
+    param "Character: %c\n"
+    t6 = c
+    param t6
+    t7 = call printf, 2
+    param "String: %s\n"
+    t8 = str
+    param t8
+    t9 = call printf, 2
+    t10 = (void *)ptr
+    param "Pointer: %p\n"
+    param t10
+    t11 = call printf, 2
+    param "Multiple: %d %f %c %s\n"
+    t12 = i
+    param t12
+    t13 = f
+    t14 = (double)t13
+    param t14
+    t15 = c
+    param t15
+    t16 = str
+    param t16
+    t17 = call printf, 5
+    param "Line 1\nLine 2\nLine 3\n"
+    t18 = call printf, 1
+    param "Enter an integer: "
+    t19 = call printf, 1
+    t20 = &input_int
+    param "%d"
+    param t20
+    t21 = call scanf, 2
+    param "Enter a float: "
+    t22 = call printf, 1
+    t23 = &input_float
+    param "%f"
+    param t23
+    t24 = call scanf, 2
+    param "Enter a character: "
+    t25 = call printf, 1
+    t26 = &input_char
+    param " %c"
+    param t26
+    t27 = call scanf, 2
+    param "Enter a string: "
+    t28 = call printf, 1
+    param "%s"
+    t29 = input_str
+    param t29
+    t30 = call scanf, 2
+    param "You entered: %d, %.2f, %c, %s\n"
+    t31 = input_int
+    param t31
+    t32 = input_float
+    t33 = (double)t32
+    param t33
+    t34 = input_char
+    param t34
+    t35 = input_str
+    param t35
+    t36 = call printf, 5
+    param "Enter two integers: "
+    t37 = call printf, 1
+    t38 = &a
+    t39 = &b
+    param "%d %d"
+    param t38
+    param t39
+    t40 = call scanf, 3
+    t41 = &input_int
+    param "%d"
+    param t41
+    t42 = call scanf, 2
+    result = t42
+    t43 = result == 1
+    if t43 == 0 goto L0
+    param "Successfully read one integer\n"
+    t44 = call printf, 1
+    goto L1
+L0:
+    param "Failed to read integer\n"
+    t45 = call printf, 1
+L1:
+    return 0
+func_end main
+

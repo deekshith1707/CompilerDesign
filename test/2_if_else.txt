@@ -1,0 +1,68 @@
+// Test case for if-else statements
+#include <stdio.h>
+
+int main() {
+    int x = 10, y = 20;
+    float f = 5.5;
+    char c = 'A';
+    int* ptr = &x;
+    
+    // Simple if statement
+    if (x > 5) {
+        printf("x is greater than 5\n");
+    }
+    
+    // If-else statement
+    if (x > y) {
+        printf("x is greater than y\n");
+    } else {
+        printf("x is not greater than y\n");
+    }
+    
+    // If-else if-else chain
+    if (x > 20) {
+        printf("x is large\n");
+    } else if (x > 10) {
+        printf("x is medium\n");
+    } else {
+        printf("x is small\n");
+    }
+    
+    // Nested if statements
+    if (x > 0) {
+        if (y > 0) {
+            printf("Both x and y are positive\n");
+        } else {
+            printf("x is positive, y is not\n");
+        }
+    }
+    
+    // Complex conditions
+    if ((x > 5) && (y < 30) || (f > 2.0)) {
+        printf("Complex condition satisfied\n");
+    }
+    
+    // Different types in conditions
+    if (c) {                    // char as condition
+        printf("Character condition\n");
+    }
+    
+    if (ptr) {                  // pointer as condition
+        printf("Pointer is not NULL\n");
+    }
+    
+    if (f) {                    // float as condition
+        printf("Float condition\n");
+    }
+    
+    // Scope testing within if blocks
+    if (x > 0) {
+        int local_var = 100;                         // local to this if block
+        printf("Local variable: %d\n", local_var);
+    }
+
+    // printf("%d\n", local_var);  // ERROR: local_var not in scope
+
+    
+    return 0;
+}

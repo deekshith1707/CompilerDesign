@@ -1,0 +1,83 @@
+# Three-Address Code (Intermediate Representation)
+# ================================================
+
+func_begin main
+    t0 = argc < 9
+    if t0 == 0 goto L0
+    t1 = argv[0]
+    param "Usage: %s <int1> <int2> <int3> <double1> <double2> <double3> <long1> <long2>\n"
+    param t1
+    t2 = call printf, 2
+    return 1
+L0:
+    t3 = argv[1]
+    param t3
+    t4 = call atoi, 1
+    i1 = t4
+    t5 = argv[2]
+    param t5
+    t6 = call atoi, 1
+    i2 = t6
+    t7 = argv[3]
+    param t7
+    t8 = call atoi, 1
+    i3 = t8
+    t9 = argv[4]
+    param t9
+    t10 = call atof, 1
+    d1 = t10
+    t11 = argv[5]
+    param t11
+    t12 = call atof, 1
+    d2 = t12
+    t13 = argv[6]
+    param t13
+    t14 = call atof, 1
+    d3 = t14
+    t15 = argv[7]
+    param t15
+    t16 = call atol, 1
+    l1 = t16
+    t17 = argv[8]
+    param t17
+    t18 = call atol, 1
+    l2 = t18
+    t19 = i1
+    param t19
+    t20 = call abs, 1
+    a1 = t20
+    t21 = i2
+    param t21
+    t22 = call abs, 1
+    a2 = t22
+    param "Integers: %d %d %d\n"
+    t23 = i1
+    param t23
+    t24 = i2
+    param t24
+    t25 = i3
+    param t25
+    t26 = call printf, 4
+    param "Doubles: %lf %lf %lf\n"
+    t27 = d1
+    param t27
+    t28 = d2
+    param t28
+    t29 = d3
+    param t29
+    t30 = call printf, 4
+    param "Longs: %ld %ld\n"
+    t31 = l1
+    param t31
+    t32 = l2
+    param t32
+    t33 = call printf, 3
+    param "Absolute values: %d %d\n"
+    t34 = a1
+    param t34
+    t35 = a2
+    param t35
+    t36 = call printf, 3
+    return 0
+func_end main
+

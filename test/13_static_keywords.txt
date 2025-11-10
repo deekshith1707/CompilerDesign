@@ -1,0 +1,20 @@
+// Test file for static storage class
+int global_var = 10;
+static int file_static_var = 20;
+
+int regular_function(int x) {
+    return x + 1;
+}
+
+static int static_function(int y) {
+    static int local_static = 0;
+    int local_auto = 5;
+    local_static++;
+    return y + local_static + local_auto;
+}
+
+int main() {
+    int local = 30;
+    static int main_static = 40;
+    return 0;
+}

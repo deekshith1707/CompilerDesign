@@ -1,0 +1,152 @@
+# Three-Address Code (Intermediate Representation)
+# ================================================
+
+func_begin main
+    choice = 2
+    grade = 'B'
+    t0 = 1
+    t1 = choice == t0
+    if t1 != 0 goto SWITCH_0_CASE_1
+    t2 = 2
+    t3 = choice == t2
+    if t3 != 0 goto SWITCH_0_CASE_2
+    t4 = 3
+    t5 = choice == t4
+    if t5 != 0 goto SWITCH_0_CASE_3
+    goto SWITCH_0_DEFAULT
+SWITCH_0_CASE_1:
+    param "Choice is 1\n"
+    t6 = call printf, 1
+    goto L0
+SWITCH_0_CASE_2:
+    param "Choice is 2\n"
+    t7 = call printf, 1
+    goto L0
+SWITCH_0_CASE_3:
+    param "Choice is 3\n"
+    t8 = call printf, 1
+    goto L0
+SWITCH_0_DEFAULT:
+    param "Invalid choice\n"
+    t9 = call printf, 1
+    goto L0
+L0:
+    t10 = 1
+    t11 = choice == t10
+    if t11 != 0 goto SWITCH_1_CASE_1
+    t12 = 2
+    t13 = choice == t12
+    if t13 != 0 goto SWITCH_1_CASE_2
+    t14 = 3
+    t15 = choice == t14
+    if t15 != 0 goto SWITCH_1_CASE_3
+    goto L1
+SWITCH_1_CASE_1:
+    param "Case 1\n"
+    t16 = call printf, 1
+SWITCH_1_CASE_2:
+    param "Case 2 (or fall-through from 1)\n"
+    t17 = call printf, 1
+    goto L1
+SWITCH_1_CASE_3:
+    param "Case 3\n"
+    t18 = call printf, 1
+    goto L1
+L1:
+    t19 = 'A'
+    t20 = grade == t19
+    if t20 != 0 goto SWITCH_2_CASE_'A'
+    t21 = 'a'
+    t22 = grade == t21
+    if t22 != 0 goto SWITCH_2_CASE_'a'
+    t23 = 'B'
+    t24 = grade == t23
+    if t24 != 0 goto SWITCH_2_CASE_'B'
+    t25 = 'b'
+    t26 = grade == t25
+    if t26 != 0 goto SWITCH_2_CASE_'b'
+    t27 = 'C'
+    t28 = grade == t27
+    if t28 != 0 goto SWITCH_2_CASE_'C'
+    t29 = 'c'
+    t30 = grade == t29
+    if t30 != 0 goto SWITCH_2_CASE_'c'
+    goto SWITCH_2_DEFAULT
+SWITCH_2_CASE_'A':
+SWITCH_2_CASE_'a':
+    param "Excellent\n"
+    t31 = call printf, 1
+    goto L2
+SWITCH_2_CASE_'B':
+SWITCH_2_CASE_'b':
+    param "Good\n"
+    t32 = call printf, 1
+    goto L2
+SWITCH_2_CASE_'C':
+SWITCH_2_CASE_'c':
+    param "Average\n"
+    t33 = call printf, 1
+    goto L2
+SWITCH_2_DEFAULT:
+    param "Invalid grade\n"
+    t34 = call printf, 1
+L2:
+    color = 2
+    t35 = 1
+    t36 = color == t35
+    if t36 != 0 goto SWITCH_3_CASE_1
+    t37 = 2
+    t38 = color == t37
+    if t38 != 0 goto SWITCH_3_CASE_2
+    t39 = 3
+    t40 = color == t39
+    if t40 != 0 goto SWITCH_3_CASE_3
+    goto L3
+SWITCH_3_CASE_1:
+    param "Color is red\n"
+    t41 = call printf, 1
+    goto L3
+SWITCH_3_CASE_2:
+    param "Color is green\n"
+    t42 = call printf, 1
+    goto L3
+SWITCH_3_CASE_3:
+    param "Color is blue\n"
+    t43 = call printf, 1
+    goto L3
+L3:
+    category = 1
+    subcategory = 2
+    t44 = 1
+    t45 = category == t44
+    if t45 != 0 goto SWITCH_4_CASE_1
+    t46 = 2
+    t47 = category == t46
+    if t47 != 0 goto SWITCH_4_CASE_2
+    goto L4
+SWITCH_4_CASE_1:
+    t48 = 1
+    t49 = subcategory == t48
+    if t49 != 0 goto SWITCH_5_CASE_1
+    t50 = 2
+    t51 = subcategory == t50
+    if t51 != 0 goto SWITCH_5_CASE_2
+    goto L5
+SWITCH_5_CASE_1:
+    param "Category 1, Subcategory 1\n"
+    t52 = call printf, 1
+    goto L5
+SWITCH_5_CASE_2:
+    param "Category 1, Subcategory 2\n"
+    t53 = call printf, 1
+    goto L5
+L5:
+    goto L4
+SWITCH_4_CASE_2:
+    param "Category 2\n"
+    t54 = call printf, 1
+    goto L4
+L4:
+    return 0
+func_end main
+

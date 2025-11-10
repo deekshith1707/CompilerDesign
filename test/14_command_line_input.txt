@@ -1,0 +1,37 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(int argc, char* argv[]) {
+
+    if (argc < 9) {
+        printf("Usage: %s <int1> <int2> <int3> <double1> <double2> <double3> <long1> <long2>\n", argv[0]);
+        return 1;
+    }
+
+    // COMMAND-LINE INPUT CONVERSIONS
+
+    // Integers
+    int i1 = atoi(argv[1]);          
+    int i2 = atoi(argv[2]);          
+    int i3 = atoi(argv[3]);          
+
+    // Doubles
+    double d1 = atof(argv[4]);       
+    double d2 = atof(argv[5]);       
+    double d3 = atof(argv[6]);       
+
+    // Longs
+    long l1 = atol(argv[7]);         
+    long l2 = atol(argv[8]);         
+
+    // Absolute values
+    int a1 = abs(i1);                
+    int a2 = abs(i2);                
+
+    printf("Integers: %d %d %d\n", i1, i2, i3);
+    printf("Doubles: %lf %lf %lf\n", d1, d2, d3);
+    printf("Longs: %ld %ld\n", l1, l2);
+    printf("Absolute values: %d %d\n", a1, a2);
+
+    return 0;
+}

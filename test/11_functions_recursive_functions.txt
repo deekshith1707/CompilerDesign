@@ -1,0 +1,100 @@
+// Test case for function calls and recursive Functions
+#include <stdio.h>
+
+// Function prototypes
+int add(int a, int b);
+int subtract(int a, int b);
+int multiply(int a, int b);
+int factorial(int n);
+int max(int a, int b, int c);
+void printMessage(int value);
+
+// Function definitions
+int add(int a, int b) {
+    return a + b;
+}
+
+int subtract(int a, int b) {
+    return a - b;
+}
+
+int multiply(int a, int b) {
+    return a * b;
+}
+
+int factorial(int n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+int max(int a, int b, int c) {
+    int result = a;
+    if (b > result) {
+        result = b;
+    }
+    if (c > result) {
+        result = c;
+    }
+    return result;
+}
+
+void printMessage(int value) {
+    printf("Value is: %d\n", value);
+}
+
+int main() {
+    int result1 = add(10, 20);
+    printf("Addition: %d\n", result1);
+    
+    int result2 = subtract(50, 15);
+    printf("Subtraction: %d\n", result2);
+    
+    int result3 = multiply(5, 6);
+    printf("Multiplication: %d\n", result3);
+    
+    int x = 10;
+    int y = 20;
+    int sum = add(x, y);
+    printf("Sum of x and y: %d\n", sum);
+    
+    // Function call with expressions
+    int expr_result = add(x + 5, y * 2);
+    printf("Expression result: %d\n", expr_result);
+    
+    // Nested function calls
+    int nested = add(add(1, 2), add(3, 4));
+    printf("Nested calls: %d\n", nested);
+    
+    // Recursive function call
+    int fact5 = factorial(5);
+    printf("Factorial of 5: %d\n", fact5);
+    
+    int fact3 = factorial(3);
+    printf("Factorial of 3: %d\n", fact3);
+    
+    // Function with multiple arguments
+    int maximum = max(15, 25, 10);
+    printf("Maximum: %d\n", maximum);
+    
+    int max2 = max(100, 50, 75);
+    printf("Maximum2: %d\n", max2);
+    
+    // Void function call
+    printMessage(42);
+    printMessage(result1);
+    
+    // Complex expression with function calls
+    int complex = add(multiply(2, 3), subtract(10, 4));
+    printf("Complex expression: %d\n", complex);
+    
+    // Multiple operations
+    int a = 5;
+    int b = 10;
+    int c = 15;
+    int result = add(a, multiply(b, c));
+    printf("a + (b * c) = %d\n", result);
+    
+    return 0;
+}

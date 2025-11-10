@@ -1,0 +1,50 @@
+# Three-Address Code (Intermediate Representation)
+# ================================================
+
+func_begin transform
+    LOAD [x]  t0
+    t1 = t0 + 10
+    STORE t1  [x]
+    LOAD [c]  t2
+    t3 = CAST_char_to_int(t2)
+    t4 = t3 + 2
+    t5 = CAST_int_to_char(t4)
+    STORE t5  [c]
+    LOAD [b]  t6
+    t7 = !t6
+    t8 = CAST_int_to_bool(t7)
+    STORE t8  [b]
+    return
+func_end transform
+
+func_begin toFloat
+    t9 = CAST_int_to_float(n)
+    t10 = t9 + 0.5
+    return t10
+func_end toFloat
+
+func_begin main
+    mod = transform
+    conv = toFloat
+    val = 7
+    ch = 'A'
+    t11 = CAST_int_to_bool(0)
+    flag = t11
+    t12 = &val
+    param t12
+    t13 = &ch
+    param t13
+    t14 = &flag
+    param t14
+    INDIRECT_CALL mod 3 
+    t15 = val
+    param t15
+    INDIRECT_CALL conv 1 t16
+    f = t16
+    t17 = CAST_float_to_int(f)
+    t18 = CAST_char_to_int(ch)
+    t19 = t17 + t18
+    final = t19
+    return final
+func_end main
+

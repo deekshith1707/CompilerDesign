@@ -1,0 +1,27 @@
+// References, function pointers, and conversions
+
+void transform(int &x, char &c, bool &b) {
+    x = x + 10;
+    c = c + 2;       // move forward by 2 letters
+    b = !b;
+}
+
+float toFloat(int n) {
+    return (float)n + 0.5;   // implicit int->float
+}
+
+int main() {
+    void (*mod)(int &, char &, bool &) = transform;
+    float (*conv)(int) = toFloat;
+
+    int val = 7;
+    char ch = 'A';
+    bool flag = false;
+
+    mod(val, ch, flag);      // val=17, ch='C', flag=true
+
+    float f = conv(val);     // 17 -> 17.5
+    int final = (int)f + ch; // (17) + 67 = 84
+
+    return final;            // Expected output: 84
+}

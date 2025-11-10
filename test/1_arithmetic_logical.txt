@@ -1,0 +1,55 @@
+// Test case for arithmetic and logical operators
+#include <stdio.h>
+
+int main() {
+    // Test arithmetic operators
+    int a = 10, b = 3;
+    float f1 = 5.5, f2 = 2.2;
+    char c1 = 'A', c2 = 'B';
+    
+    // Valid arithmetic operations
+    int sum = a + b;           // int + int = int
+    float fsum = f1 + f2;      // float + float = float
+    float mixed = a + f1;      // int + float = float (type promotion)
+    int diff = a - b;          // subtraction
+    int prod = a * b;          // multiplication
+    int quot = a / b;          // division
+    int mod = a % b;           // modulus (only for integers)
+    
+    // Test logical operators
+    int result1 = (a > b) && (f1 > f2);    // logical AND
+    int result2 = (a < b) || (f1 < f2);    // logical OR
+    int result3 = !(a == b);               // logical NOT
+    
+    // Test relational operators
+    int rel1 = a > b;          // greater than
+    int rel2 = a < b;          // less than
+    int rel3 = a >= b;         // greater than or equal
+    int rel4 = a <= b;         // less than or equal
+    int rel5 = a == b;         // equality
+    int rel6 = a != b;         // inequality
+    
+    // Test bitwise operators
+    int bit1 = a & b;          // bitwise AND
+    int bit2 = a | b;          // bitwise OR
+    int bit3 = a ^ b;          // bitwise XOR
+    int bit4 = ~a;             // bitwise NOT
+    int bit5 = a << 2;         // left shift
+    int bit6 = a >> 1;         // right shift
+    
+    // Test increment/decrement
+    int pre_inc = ++a;         // pre-increment
+    int post_inc = b++;        // post-increment
+    int pre_dec = --a;         // pre-decrement
+    int post_dec = b--;        // post-decrement
+    
+    /*
+    // Type errors (should be caught by semantic analyzer)
+    float fmod = f1 % f2;      // ERROR: modulus not allowed for float
+    int str_add = "hello" + "world";  // ERROR: string arithmetic
+    int ptr_mod = &a % &b;     // ERROR: modulus with pointers
+    */
+    
+    printf("Arithmetic and logical operations completed\n");
+    return 0;
+}

@@ -1,0 +1,168 @@
+// Test case for goto, break and continue
+#include <stdio.h>
+
+int main() {
+    int i, j;
+    
+    // ===== GOTO STATEMENT TESTING =====
+    
+    // Simple goto
+    goto skip_section;
+    
+    
+skip_section: {
+    int choice = 2;
+    if (choice == 1) {
+        goto option1;
+    } else if (choice == 2) {
+        goto option2;
+    } else {
+        goto default_option;
+    }
+}
+
+    
+option1:
+    goto end_options;
+    
+option2:
+    goto end_options;
+    
+default_option:
+    printf("Default option\n");
+    
+end_options:
+    printf("End of options\n");
+    
+    // Goto in loop
+    i = 0;
+loop_start:
+    if (i >= 5) goto loop_end;
+    if (i == 2) {
+        i++;
+        goto loop_start;        // Similar to continue
+    }
+    printf("Loop iteration: %d\n", i);
+    i++;
+    goto loop_start;
+    
+loop_end:
+    
+    // ===== BREAK STATEMENT TESTING =====
+    
+    // Break in for loop
+    for (i = 0; i < 10; i++) {
+        if (i == 5) {
+            printf("Breaking at i = %d\n", i);
+            break;                
+        }
+        printf("i = %d\n", i);
+    }
+    
+    // Break in while loop
+    i = 0;
+    while (1) {                
+        if (i >= 3) {
+            printf("Breaking at i = %d\n", i);
+            break;                 
+        }
+        printf("i = %d\n", i);
+        i++;
+    }
+    
+    // Break in do-while loop
+    i = 0;
+    do {
+        if (i == 2) {
+            printf("Breaking at i = %d\n", i);
+            break;                 
+        }
+        printf("i = %d\n", i);
+        i++;
+    } while (i < 5);
+    
+    // Break in switch statement
+    printf("\nTesting break in switch:\n");
+    int value = 2;
+    switch (value) {
+        case 1:
+            printf("Case 1\n");
+            break;
+        case 2 :
+            printf("Case 2\n");
+            break;                  
+        default:
+            printf("Default case\n");
+            break;                  
+    }
+    
+    // Break in nested loops (only breaks inner loop)
+    for (i = 0; i < 3; i++) {
+        printf("Outer loop i = %d\n", i);
+        for (j = 0; j < 5; j++) {
+            if (j == 2) {
+                break;              
+            }
+        }
+    }
+    
+    // ===== CONTINUE STATEMENT TESTING =====
+    
+    // Continue in for loop
+    for (i = 0; i < 8; i++) {
+        if (i % 2 == 0) {
+            continue;               // Skip even numbers
+        }
+        printf("Odd number: %d\n", i);
+    }
+    
+    // Continue in while loop
+    i = 0;
+    while (i < 6) {
+        i++;
+        if (i == 3 || i == 5) {
+            continue;            
+        }
+        printf("i = %d\n", i);
+    }
+    
+    // Continue in do-while loop
+    i = 0;
+    do {
+        i++;
+        if (i == 2 || i == 4) {
+            continue;              
+        }
+        printf("i = %d\n", i);
+    } while (i < 6);
+    
+    // Continue in nested loops (only affects inner loop)
+    for (i = 0; i < 3; i++) {
+        for (j = 0; j < 5; j++) {
+            if (j == 2) {
+                continue;      
+            }
+        }
+    }
+    
+    /*
+    // Error cases
+    
+    // Goto to undefined label
+    goto undefined_label;        // ERROR: label not defined
+    
+    // Break outside of loop/switch
+    break;                       // ERROR: break not in loop or switch
+    
+    // Continue outside of loop
+    continue;                    // ERROR: continue not in loop
+    
+    // Multiple labels with same name
+    duplicate:
+    printf("First duplicate\n");
+    duplicate:                   // ERROR: duplicate label
+    printf("Second duplicate\n");
+    */
+
+    return 0;
+}

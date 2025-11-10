@@ -1,0 +1,259 @@
+# Three-Address Code (Intermediate Representation)
+# ================================================
+
+func_begin main
+    goto skip_section
+skip_section:
+    choice = 2
+    t0 = choice == 1
+    if t0 == 0 goto L0
+    goto option1
+L0:
+    t1 = choice == 2
+    if t1 == 0 goto L2
+    goto option2
+L2:
+    goto default_option
+L1:
+option1:
+    goto end_options
+option2:
+    goto end_options
+default_option:
+    param "Default option\n"
+    t2 = call printf, 1
+end_options:
+    param "End of options\n"
+    t3 = call printf, 1
+    i = 0
+loop_start:
+    t4 = i >= 5
+    if t4 == 0 goto L4
+    goto loop_end
+L4:
+    t5 = i == 2
+    if t5 == 0 goto L5
+    t6 = i
+    t7 = i + 1
+    i = t7
+    goto loop_start
+L5:
+    param "Loop iteration: %d\n"
+    t8 = i
+    param t8
+    t9 = call printf, 2
+    t10 = i
+    t11 = i + 1
+    i = t11
+    goto loop_start
+loop_end:
+    i = 0
+L6:
+    t12 = i < 10
+    if t12 == 0 goto L8
+    t13 = i == 5
+    if t13 == 0 goto L9
+    param "Breaking at i = %d\n"
+    t14 = i
+    param t14
+    t15 = call printf, 2
+    goto L8
+L9:
+    param "i = %d\n"
+    t16 = i
+    param t16
+    t17 = call printf, 2
+L7:
+    t18 = i
+    t19 = i + 1
+    i = t19
+    goto L6
+L8:
+    i = 0
+L10:
+    if 1 == 0 goto L11
+    t20 = i >= 3
+    if t20 == 0 goto L12
+    param "Breaking at i = %d\n"
+    t21 = i
+    param t21
+    t22 = call printf, 2
+    goto L11
+L12:
+    param "i = %d\n"
+    t23 = i
+    param t23
+    t24 = call printf, 2
+    t25 = i
+    t26 = i + 1
+    i = t26
+    goto L10
+L11:
+    i = 0
+L13:
+    t27 = i == 2
+    if t27 == 0 goto L16
+    param "Breaking at i = %d\n"
+    t28 = i
+    param t28
+    t29 = call printf, 2
+    goto L15
+L16:
+    param "i = %d\n"
+    t30 = i
+    param t30
+    t31 = call printf, 2
+    t32 = i
+    t33 = i + 1
+    i = t33
+L14:
+    t34 = i < 5
+    if t34 != 0 goto L13
+L15:
+    param "\nTesting break in switch:\n"
+    t35 = call printf, 1
+    value = 2
+    t36 = 1
+    t37 = value == t36
+    if t37 != 0 goto SWITCH_0_CASE_1
+    t38 = 2
+    t39 = value == t38
+    if t39 != 0 goto SWITCH_0_CASE_2
+    goto SWITCH_0_DEFAULT
+SWITCH_0_CASE_1:
+    param "Case 1\n"
+    t40 = call printf, 1
+    goto L17
+SWITCH_0_CASE_2:
+    param "Case 2\n"
+    t41 = call printf, 1
+    goto L17
+SWITCH_0_DEFAULT:
+    param "Default case\n"
+    t42 = call printf, 1
+    goto L17
+L17:
+    i = 0
+L18:
+    t43 = i < 3
+    if t43 == 0 goto L20
+    param "Outer loop i = %d\n"
+    t44 = i
+    param t44
+    t45 = call printf, 2
+    j = 0
+L21:
+    t46 = j < 5
+    if t46 == 0 goto L23
+    t47 = j == 2
+    if t47 == 0 goto L24
+    goto L23
+L24:
+L22:
+    t48 = j
+    t49 = j + 1
+    j = t49
+    goto L21
+L23:
+L19:
+    t50 = i
+    t51 = i + 1
+    i = t51
+    goto L18
+L20:
+    i = 0
+L25:
+    t52 = i < 8
+    if t52 == 0 goto L27
+    t53 = i % 2
+    t54 = t53 == 0
+    if t54 == 0 goto L28
+    goto L26
+L28:
+    param "Odd number: %d\n"
+    t55 = i
+    param t55
+    t56 = call printf, 2
+L26:
+    t57 = i
+    t58 = i + 1
+    i = t58
+    goto L25
+L27:
+    i = 0
+L29:
+    t59 = i < 6
+    if t59 == 0 goto L30
+    t60 = i
+    t61 = i + 1
+    i = t61
+    t63 = i == 3
+    if t63 != 0 goto L31
+    t64 = i == 5
+    if t64 != 0 goto L31
+    t62 = 0
+    goto L32
+L31:
+    t62 = 1
+L32:
+    if t62 == 0 goto L33
+    goto L29
+L33:
+    param "i = %d\n"
+    t65 = i
+    param t65
+    t66 = call printf, 2
+    goto L29
+L30:
+    i = 0
+L34:
+    t67 = i
+    t68 = i + 1
+    i = t68
+    t70 = i == 2
+    if t70 != 0 goto L37
+    t71 = i == 4
+    if t71 != 0 goto L37
+    t69 = 0
+    goto L38
+L37:
+    t69 = 1
+L38:
+    if t69 == 0 goto L39
+    goto L35
+L39:
+    param "i = %d\n"
+    t72 = i
+    param t72
+    t73 = call printf, 2
+L35:
+    t74 = i < 6
+    if t74 != 0 goto L34
+L36:
+    i = 0
+L40:
+    t75 = i < 3
+    if t75 == 0 goto L42
+    j = 0
+L43:
+    t76 = j < 5
+    if t76 == 0 goto L45
+    t77 = j == 2
+    if t77 == 0 goto L46
+    goto L44
+L46:
+L44:
+    t78 = j
+    t79 = j + 1
+    j = t79
+    goto L43
+L45:
+L41:
+    t80 = i
+    t81 = i + 1
+    i = t81
+    goto L40
+L42:
+    return 0
+func_end main
+

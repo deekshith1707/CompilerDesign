@@ -1,0 +1,37 @@
+// enums and unions: definitions, usage, switch
+int main() {
+    enum Color { RED, GREEN = 5, BLUE };
+    enum Color c = BLUE;
+
+    // switch on enum
+    switch (c) {
+        case RED:
+            break;
+        case BLUE:
+            break;
+        default:
+            break;
+    }
+
+    // enum usage
+    enum Mode { OFF, ON = 10 };
+    enum Mode m = ON;
+
+    // union definition and usage
+    union Data {
+        int i;
+        float f;
+        char str[20];
+    };
+
+    union Data data;
+    data.i = 10;
+    int val1 = data.i;
+
+    data.f = 3.14;
+    float val2 = data.f;
+
+    int esize = sizeof(int);
+
+    return val1 + esize;
+}

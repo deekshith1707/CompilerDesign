@@ -1,0 +1,90 @@
+// Test case for while loop
+#include <stdio.h>
+
+int main() {
+    int i, count;
+    int arr[10] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    
+    // Basic while loop
+    i = 0;
+    while (i < 10) {
+        printf("i = %d\n", i);
+        i++;
+    }
+    
+    // While loop with complex condition
+    i = 0;
+    while (i < 10 && arr[i] < 8) {
+        printf("arr[%d] = %d\n", i, arr[i]);
+        i++;
+    }
+    
+    // While loop with different data types
+    float f = 0.0;
+    while (f < 5.0) {
+        printf("f = %.1f\n", f);
+        f += 0.5;
+    }
+    
+    // While loop with pointer
+    int* ptr = arr;
+    while (ptr < arr + 5) {
+        printf("Value: %d\n", *ptr);
+        ptr++;
+    }
+    
+    // While loop with character
+    char c = 'A';
+    while (c <= 'E') {
+        printf("Character: %c\n", c);
+        c++;
+    }
+    
+    // Nested while loops
+    i = 0;
+    while (i < 3) {
+        int j = 0;
+        while (j < 3) {
+            printf("i=%d, j=%d\n", i, j);
+            j++;
+        }
+        i++;
+    }
+    
+    // While loop with break and continue
+    i = 0;
+    while (i < 10) {
+        i++;
+        if (i == 3) continue;       // Skip when i is 3
+        if (i == 7) break;          // Exit when i is 7
+        printf("i = %d\n", i);
+    }
+    
+    // Infinite while loop with break
+    count = 0;
+    while (1) {                     // Always true
+        count++;
+        if (count > 5) break;
+        printf("count = %d\n", count);
+    }
+    
+    // While loop testing variable scope
+    i = 0;
+    while (i < 3) {
+        int local_var = i * 10;     // local to this iteration
+        printf("Local: %d\n", local_var);
+        i++;
+    }
+    // printf("%d\n", local_var);   // ERROR: local_var not in scope
+    
+    // Type checking for condition
+    int* null_ptr = NULL;
+    while (null_ptr) {              // Valid: pointer as condition
+        // This won't execute
+    }
+    
+    while ("hello") { }          // Infinite loop
+    while (arr) { }              // Infinite loop
+    
+    return 0;
+}

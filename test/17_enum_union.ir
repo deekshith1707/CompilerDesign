@@ -1,0 +1,36 @@
+# Three-Address Code (Intermediate Representation)
+# ================================================
+
+func_begin main
+    c = BLUE
+    t0 = 0
+    t1 = c == t0
+    if t1 != 0 goto SWITCH_0_CASE_0
+    t2 = 6
+    t3 = c == t2
+    if t3 != 0 goto SWITCH_0_CASE_6
+    goto SWITCH_0_DEFAULT
+SWITCH_0_CASE_0:
+    goto L0
+SWITCH_0_CASE_6:
+    goto L0
+SWITCH_0_DEFAULT:
+    goto L0
+L0:
+    m = ON
+    t4 = &data
+    *(t4 + 0) = 10
+    t5 = &data
+    t6 = *(t5 + 0)
+    val1 = t6
+    t7 = &data
+    *(t7 + 0) = 3.14
+    t8 = &data
+    t9 = *(t8 + 0)
+    val2 = t9
+    t10 = 4
+    esize = t10
+    t11 = val1 + esize
+    return t11
+func_end main
+
