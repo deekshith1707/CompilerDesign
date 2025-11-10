@@ -75,6 +75,24 @@ bool isConstantValue(const char* str) {
 }
 
 /**
+ * Check if a constant is a float (contains a decimal point)
+ */
+bool isFloatConstant(const char* str) {
+    if (str == NULL || strlen(str) == 0) {
+        return false;
+    }
+    
+    // Check for decimal point
+    for (int i = 0; str[i] != '\0'; i++) {
+        if (str[i] == '.') {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
  * Check if instruction is a function begin
  */
 bool isFunctionBegin(const Quadruple* quad) {
@@ -535,6 +553,7 @@ void testActivationRecords() {
     printf("\n");
     printf("╔════════════════════════════════════════════════════════════╗\n");
     printf("║  PHASE 1: Runtime Environment & Stack Frame Management   ║\n");
+
     printf("║  Testing Activation Record Generation                     ║\n");
     printf("╚════════════════════════════════════════════════════════════╝\n");
     
@@ -794,7 +813,30 @@ void loadVariable(MIPSCodeGenerator* codegen, const char* varName, int regNum) {
     
     // Check if it's a constant
     if (isConstantValue(varName)) {
-        // Load immediate value
+        // Handle float constants specially (MIPS li doesn't support floats)
+        if (isFloatConstant(varName)) {
+            // For now, convert float to integer (truncate)
+            // TODO: Proper float support would use FPU registers and .data section
+            int intValue = (int)atof(varName);
+            sprintf(instr, "    li %s, %d    # Float %s truncated to int", 
+                    getRegisterName(regNum), intValue, varName);
+            emitMIPS(codegen, instr);
+            return;
+        }
+        
+        // Handle character literals
+        if (varName[0] == '\'') {
+            // Extract ASCII value from 'X'
+            if (strlen(varName) >= 3) {
+                int asciiValue = (int)varName[1];
+                sprintf(instr, "    li %s, %d    # '%c'", 
+                        getRegisterName(regNum), asciiValue, varName[1]);
+                emitMIPS(codegen, instr);
+                return;
+            }
+        }
+        
+        // Load integer immediate value
         sprintf(instr, "    li %s, %s", getRegisterName(regNum), varName);
         emitMIPS(codegen, instr);
         return;
@@ -1038,8 +1080,24 @@ void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
  */
 void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad) {
     char label[128];
-    sprintf(label, "%s:", quad->result);
-    emitMIPS(codegen, label);
+    
+    // Labels can be stored in different formats:
+    // 1. op="LABEL", arg1="L0" (standard format from IR file)
+    // 2. op="L0", result="..." (alternative format)
+    const char* labelName = NULL;
+    
+    if (strcmp(quad->op, "LABEL") == 0 && strlen(quad->arg1) > 0) {
+        labelName = quad->arg1;
+    } else if (quad->op[0] == 'L' && isdigit(quad->op[1])) {
+        labelName = quad->op;
+    } else if (strlen(quad->result) > 0) {
+        labelName = quad->result;
+    }
+    
+    if (labelName != NULL) {
+        sprintf(label, "%s:", labelName);
+        emitMIPS(codegen, label);
+    }
 }
 
 /**
@@ -1249,9 +1307,8 @@ void translateParam(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
                 emitMIPS(codegen, instr);
             }
         } else if (isConstantValue(paramValue)) {
-            // Numeric constant - load immediate to argument register
-            sprintf(instr, "    li %s, %s", getRegisterName(argReg), paramValue);
-            emitMIPS(codegen, instr);
+            // Numeric constant - use loadVariable which handles floats properly
+            loadVariable(codegen, paramValue, argReg);
         } else {
             // Get register for variable
             int srcReg = getReg(codegen, paramValue, irIndex);
@@ -1375,9 +1432,8 @@ void translateReturn(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
         const char* retValue = quad->arg1;
         
         if (isConstantValue(retValue)) {
-            // Return constant
-            sprintf(instr, "    li $v0, %s", retValue);
-            emitMIPS(codegen, instr);
+            // Return constant - use loadVariable which handles floats
+            loadVariable(codegen, retValue, REG_V0);
         } else {
             // Return variable - get its register
             int srcReg = getReg(codegen, retValue, irIndex);
@@ -1450,32 +1506,32 @@ void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         // Variable index - calculate at runtime
         int indexReg = getReg(codegen, indexVar, irIndex);
         
-        // Calculate offset = index * element_size (use $at for offset calculation)
+        // Calculate offset = index * element_size (use $t8 for offset calculation)
         if (elementSize == 4) {
             // Multiply by 4: shift left by 2
-            sprintf(instr, "    sll $at, %s, 2", getRegisterName(indexReg));
+            sprintf(instr, "    sll $t8, %s, 2", getRegisterName(indexReg));
         } else if (elementSize == 1) {
             // Multiply by 1: offset = index
-            sprintf(instr, "    move $at, %s", getRegisterName(indexReg));
+            sprintf(instr, "    move $t8, %s", getRegisterName(indexReg));
         } else {
             // General case: multiply
             sprintf(instr, "    li $t9, %d", elementSize);
             emitMIPS(codegen, instr);
-            sprintf(instr, "    mul $at, %s, $t9", getRegisterName(indexReg));
+            sprintf(instr, "    mul $t8, %s, $t9", getRegisterName(indexReg));
         }
         emitMIPS(codegen, instr);
         
-        // Add base offset to $at
-        sprintf(instr, "    addi $at, $at, %d", baseOffset);
+        // Add base offset to $t8
+        sprintf(instr, "    addi $t8, $t8, %d", baseOffset);
         emitMIPS(codegen, instr);
         
         // Add $fp to get final address
-        sprintf(instr, "    add $at, $at, $fp");
+        sprintf(instr, "    add $t8, $t8, $fp");
         emitMIPS(codegen, instr);
         
         // Load value at address
         int resultReg = getReg(codegen, resultVar, irIndex);
-        sprintf(instr, "    lw %s, 0($at)", getRegisterName(resultReg));
+        sprintf(instr, "    lw %s, 0($t8)", getRegisterName(resultReg));
         emitMIPS(codegen, instr);
         
         updateDescriptors(codegen, resultReg, resultVar);
@@ -1514,14 +1570,8 @@ void translateAssignArray(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         
         // Get value to store
         if (isConstantValue(valueVar)) {
-            // Constant value - use $t9
-            // Check if it's a character constant
-            if (valueVar[0] == '\'') {
-                sprintf(instr, "    li $t9, %s", valueVar);
-            } else {
-                sprintf(instr, "    li $t9, %s", valueVar);
-            }
-            emitMIPS(codegen, instr);
+            // Constant value - use loadVariable which handles floats
+            loadVariable(codegen, valueVar, REG_T9);
             sprintf(instr, "    sw $t9, %d($fp)", totalOffset);
             emitMIPS(codegen, instr);
         } else {
@@ -1534,37 +1584,36 @@ void translateAssignArray(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         // Variable index - calculate at runtime
         int indexReg = getReg(codegen, indexVar, irIndex);
         
-        // Calculate offset = index * element_size (use $at)
+        // Calculate offset = index * element_size (use $t8)
         if (elementSize == 4) {
-            sprintf(instr, "    sll $at, %s, 2", getRegisterName(indexReg));
+            sprintf(instr, "    sll $t8, %s, 2", getRegisterName(indexReg));
         } else if (elementSize == 1) {
-            sprintf(instr, "    move $at, %s", getRegisterName(indexReg));
+            sprintf(instr, "    move $t8, %s", getRegisterName(indexReg));
         } else {
             sprintf(instr, "    li $t9, %d", elementSize);
             emitMIPS(codegen, instr);
-            sprintf(instr, "    mul $at, %s, $t9", getRegisterName(indexReg));
+            sprintf(instr, "    mul $t8, %s, $t9", getRegisterName(indexReg));
         }
         emitMIPS(codegen, instr);
         
-        // Add base offset to $at
-        sprintf(instr, "    addi $at, $at, %d", baseOffset);
+        // Add base offset to $t8
+        sprintf(instr, "    addi $t8, $t8, %d", baseOffset);
         emitMIPS(codegen, instr);
         
         // Add $fp to get final address
-        sprintf(instr, "    add $at, $at, $fp");
+        sprintf(instr, "    add $t8, $t8, $fp");
         emitMIPS(codegen, instr);
         
         // Get value to store
         int valueReg;
         if (isConstantValue(valueVar)) {
-            // Use $t9 for constant
-            sprintf(instr, "    li $t9, %s", valueVar);
-            emitMIPS(codegen, instr);
-            sprintf(instr, "    sw $t9, 0($at)");
+            // Use loadVariable which handles floats
+            loadVariable(codegen, valueVar, REG_T9);
+            sprintf(instr, "    sw $t9, 0($t8)");
             emitMIPS(codegen, instr);
         } else {
             valueReg = getReg(codegen, valueVar, irIndex);
-            sprintf(instr, "    sw %s, 0($at)", getRegisterName(valueReg));
+            sprintf(instr, "    sw %s, 0($t8)", getRegisterName(valueReg));
             emitMIPS(codegen, instr);
         }
     }
@@ -1648,9 +1697,8 @@ void translateAssignDeref(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
     // Get value to store
     int valueReg;
     if (isConstantValue(valueVar)) {
-        // Use $t9 for constant value
-        sprintf(instr, "    li $t9, %s", valueVar);
-        emitMIPS(codegen, instr);
+        // Use loadVariable which handles floats
+        loadVariable(codegen, valueVar, REG_T9);
         sprintf(instr, "    sw $t9, 0(%s)", getRegisterName(ptrReg));
         emitMIPS(codegen, instr);
     } else {
@@ -1817,7 +1865,13 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
         return;
     }
     
-    // Check if this is a label (op field contains label like "L0")
+    // Check if this is a label (op field is "LABEL")
+    if (strcmp(quad->op, "LABEL") == 0) {
+        translateLabel(codegen, quad);
+        return;
+    }
+    
+    // Check if op field contains a label directly (like "L0", "L1", etc.)
     if (quad->op[0] == 'L' && isdigit(quad->op[1])) {
         translateLabel(codegen, quad);
         return;

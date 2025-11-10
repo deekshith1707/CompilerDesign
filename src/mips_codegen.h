@@ -130,6 +130,14 @@ typedef struct MIPSCodeGenerator {
     int currentBlock;
     bool inFunction;
     char currentFuncName[128];
+    
+    // Function call state (Phase 3)
+    int currentParamCount;      // Track params for current CALL
+    int paramRegisterMap[10];   // Map param index to register number
+    
+    // String literal mapping (Phase 3)
+    char stringLiterals[100][256];  // Store string literals
+    int stringCount;                 // Count of string literals
 } MIPSCodeGenerator;
 
 // ============================================================================
@@ -319,12 +327,32 @@ void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad);
 void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad);
 
 /**
- * Translate array access
+ * Translate array access (reading from array)
  */
 void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
 
 /**
- * Translate pointer operations
+ * Translate array assignment (writing to array)
+ */
+void translateAssignArray(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
+
+/**
+ * Translate ADDR operation (address-of &)
+ */
+void translateAddr(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
+
+/**
+ * Translate DEREF operation (dereference *)
+ */
+void translateDeref(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
+
+/**
+ * Translate ASSIGN_DEREF operation (*ptr = value)
+ */
+void translateAssignDeref(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
+
+/**
+ * Translate pointer operations (deprecated - use specific functions above)
  */
 void translatePointerOp(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
 
@@ -356,6 +384,51 @@ bool isGlobalVariable(MIPSCodeGenerator* codegen, const char* varName);
  * Get memory location string for a variable
  */
 void getMemoryLocation(MIPSCodeGenerator* codegen, const char* varName, char* location);
+
+// ============================================================================
+// Phase 3: Advanced Features (Function Calls, Arrays, Pointers, I/O)
+// ============================================================================
+
+/**
+ * Translate PARAM instruction
+ * First 4 params go to $a0-$a3, rest pushed to stack
+ */
+void translateParam(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
+
+/**
+ * Translate CALL instruction
+ * Generate jal, handle return value, cleanup stack
+ */
+void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
+
+/**
+ * Translate RETURN instruction
+ * Move value to $v0, generate epilogue, jr $ra
+ */
+void translateReturn(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
+
+/**
+ * Translate ARRAY_ACCESS operation
+ * Calculate address: base + index * element_size
+ */
+void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
+
+/**
+ * Translate ADDR operation (address-of &)
+ * Get address of variable
+ */
+void translateAddr(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
+
+/**
+ * Translate DEREF operation (dereference *)
+ * Load value from pointer
+ */
+void translateDeref(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex);
+
+/**
+ * Generate MIPS syscall for I/O
+ */
+void generateSyscall(MIPSCodeGenerator* codegen, int syscall_num, int reg);
 
 // ============================================================================
 // Phase 6: Optimization (Lecture 36) - OPTIONAL
