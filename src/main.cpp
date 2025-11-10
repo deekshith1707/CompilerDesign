@@ -9,6 +9,7 @@
 #include "ir_context.h"
 #include "symbol_table.h"
 #include "basic_block.h"
+#include "mips_codegen.h"
 
 using namespace std;
 
@@ -19,17 +20,21 @@ extern TreeNode* ast_root;
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        cerr << "Usage: " << argv[0] << " <input_file> [--analyze-blocks]" << endl;
+        cerr << "Usage: " << argv[0] << " <input_file> [--analyze-blocks] [--activation-records]" << endl;
         cerr << "Options:" << endl;
-        cerr << "  --analyze-blocks  : Perform basic block analysis and print results" << endl;
+        cerr << "  --analyze-blocks       : Perform basic block analysis and print results" << endl;
+        cerr << "  --activation-records   : Compute and print activation records for functions" << endl;
         return 1;
     }
     
     // Check for optional flags
     bool analyzeBlocks = false;
+    bool computeActivationRecs = false;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--analyze-blocks") == 0) {
             analyzeBlocks = true;
+        } else if (strcmp(argv[i], "--activation-records") == 0) {
+            computeActivationRecs = true;
         }
     }
     
@@ -72,6 +77,13 @@ int main(int argc, char **argv) {
                 printBasicBlocks();
                 printNextUseInfo();
                 cout << "\n=== BASIC BLOCK ANALYSIS COMPLETED ===" << endl;
+            }
+            
+            // Compute activation records if requested
+            if (computeActivationRecs) {
+                cout << "\n=== COMPUTING ACTIVATION RECORDS ===" << endl;
+                testActivationRecords();
+                cout << "\n=== ACTIVATION RECORDS COMPUTATION COMPLETED ===" << endl;
             }
         } else {
             cout << "\n=== PARSING SUCCEEDED BUT NO AST WAS GENERATED ===" << endl;

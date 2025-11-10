@@ -19,6 +19,7 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
+#include <stdio.h>
 #include "ir_context.h"
 #include "basic_block.h"
 
@@ -124,9 +125,6 @@ typedef struct MIPSCodeGenerator {
     int funcCount;
     ActivationRecord* currentFunction;
     
-    // Output file
-    FILE* outputFile;
-    
     // Code generation state
     int currentBlock;
     bool inFunction;
@@ -160,6 +158,16 @@ void generateMIPSCode(MIPSCodeGenerator* codegen);
  * Compute activation records for all functions
  */
 void computeActivationRecords(MIPSCodeGenerator* codegen);
+
+/**
+ * Print activation records (for testing/debugging)
+ */
+void printActivationRecords(MIPSCodeGenerator* codegen);
+
+/**
+ * Test activation record computation (called from main.cpp)
+ */
+void testActivationRecords();
 
 /**
  * Calculate frame size for a function

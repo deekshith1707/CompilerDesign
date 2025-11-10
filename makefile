@@ -13,7 +13,7 @@ LEXER_SRC = $(SRC_DIR)/lexer.l
 PARSER_SRC = $(SRC_DIR)/parser.y
 
 # Source files for the refactored modules
-CPP_SOURCES = $(SRC_DIR)/main.cpp $(SRC_DIR)/ast.cpp $(SRC_DIR)/symbol_table.cpp $(SRC_DIR)/ir_context.cpp $(SRC_DIR)/ir_generator.cpp $(SRC_DIR)/basic_block.cpp
+CPP_SOURCES = $(SRC_DIR)/main.cpp $(SRC_DIR)/ast.cpp $(SRC_DIR)/symbol_table.cpp $(SRC_DIR)/ir_context.cpp $(SRC_DIR)/ir_generator.cpp $(SRC_DIR)/basic_block.cpp $(SRC_DIR)/mips_codegen.cpp
 
 LEXER_GEN_SRC = $(OBJ_DIR)/lex.yy.c
 PARSER_GEN_SRC = $(OBJ_DIR)/parser.tab.c
@@ -23,7 +23,7 @@ LEXER_GEN_OBJ = $(OBJ_DIR)/lex.yy.o
 PARSER_GEN_OBJ = $(OBJ_DIR)/parser.tab.o
 
 # Object files for the refactored modules
-CPP_OBJECTS = $(OBJ_DIR)/main.o $(OBJ_DIR)/ast.o $(OBJ_DIR)/symbol_table.o $(OBJ_DIR)/ir_context.o $(OBJ_DIR)/ir_generator.o $(OBJ_DIR)/basic_block.o
+CPP_OBJECTS = $(OBJ_DIR)/main.o $(OBJ_DIR)/ast.o $(OBJ_DIR)/symbol_table.o $(OBJ_DIR)/ir_context.o $(OBJ_DIR)/ir_generator.o $(OBJ_DIR)/basic_block.o $(OBJ_DIR)/mips_codegen.o
 
 OBJECTS = $(LEXER_GEN_OBJ) $(PARSER_GEN_OBJ) $(CPP_OBJECTS)
 
@@ -72,6 +72,10 @@ $(OBJ_DIR)/ir_generator.o: $(SRC_DIR)/ir_generator.cpp $(SRC_DIR)/ir_generator.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/basic_block.o: $(SRC_DIR)/basic_block.cpp $(SRC_DIR)/basic_block.h
+	@mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/mips_codegen.o: $(SRC_DIR)/mips_codegen.cpp $(SRC_DIR)/mips_codegen.h
 	@mkdir -p $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
