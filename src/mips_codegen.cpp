@@ -1048,21 +1048,23 @@ void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad) {
 void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad) {
     char instr[128];
     
-    // FIX: The label can be in result OR arg1 depending on IR format
+    // The label can be in result OR arg1 depending on IR format
+    // Labels can start with 'L' (L0, L1) or be named (skip_section, loop_end, etc.)
     const char* label = NULL;
-    if (strlen(quad->result) > 0 && quad->result[0] == 'L') {
+    
+    if (strlen(quad->result) > 0) {
         label = quad->result;
-    } else if (strlen(quad->arg1) > 0 && quad->arg1[0] == 'L') {
+    } else if (strlen(quad->arg1) > 0) {
         label = quad->arg1;
-    } else if (strlen(quad->arg2) > 0 && quad->arg2[0] == 'L') {
+    } else if (strlen(quad->arg2) > 0) {
         label = quad->arg2;
     }
     
-    if (label != NULL) {
+    if (label != NULL && strlen(label) > 0) {
         sprintf(instr, "    j %s", label);
         emitMIPS(codegen, instr);
     } else {
-        // Debug: print the quad to see what's wrong
+        // This should rarely happen - debug info
         fprintf(stderr, "Warning: GOTO instruction with no label found. Op='%s', Arg1='%s', Arg2='%s', Result='%s'\n",
                 quad->op, quad->arg1, quad->arg2, quad->result);
     }
@@ -1074,15 +1076,34 @@ void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad) {
 void translateConditionalBranch(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     char instr[256];
     
-    // Get register for condition
+    // Get register for condition variable
     int regCond = getReg(codegen, quad->arg1, irIndex);
     
-    if (strstr(quad->op, "IF_TRUE_GOTO") || strstr(quad->op, "!= 0")) {
-        // Branch if not zero
-        sprintf(instr, "    bnez %s, %s", getRegisterName(regCond), quad->result);
-    } else if (strstr(quad->op, "IF_FALSE_GOTO") || strstr(quad->op, "== 0")) {
-        // Branch if zero
-        sprintf(instr, "    beqz %s, %s", getRegisterName(regCond), quad->result);
+    // The target label is in arg2 for conditional branches
+    const char* targetLabel = quad->arg2;
+    
+    // Check the opcode to determine branch type
+    if (strcmp(quad->op, "IF_TRUE_GOTO") == 0) {
+        // Branch if condition is true (not zero)
+        sprintf(instr, "    bnez %s, %s", getRegisterName(regCond), targetLabel);
+    } 
+    else if (strcmp(quad->op, "IF_FALSE_GOTO") == 0) {
+        // Branch if condition is false (zero)
+        sprintf(instr, "    beqz %s, %s", getRegisterName(regCond), targetLabel);
+    }
+    else if (strcmp(quad->op, "IF_TRUE_GOTO_FLOAT") == 0) {
+        // Branch if float condition is true (not zero)
+        // For now, treat same as integer (proper float handling would use FPU)
+        sprintf(instr, "    bnez %s, %s", getRegisterName(regCond), targetLabel);
+    }
+    else if (strcmp(quad->op, "IF_FALSE_GOTO_FLOAT") == 0) {
+        // Branch if float condition is false (zero)
+        sprintf(instr, "    beqz %s, %s", getRegisterName(regCond), targetLabel);
+    }
+    else {
+        // Fallback - shouldn't happen but handle gracefully
+        fprintf(stderr, "Warning: Unknown conditional branch op: %s\n", quad->op);
+        sprintf(instr, "    beqz %s, %s", getRegisterName(regCond), targetLabel);
     }
     
     emitMIPS(codegen, instr);
@@ -1827,8 +1848,11 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
     else if (strcmp(quad->op, "ASSIGN") == 0 || strcmp(quad->op, "=") == 0) {
         translateAssignment(codegen, quad, irIndex);
     }
-    // Conditional branches
-    else if (strstr(quad->op, "if") != NULL && strstr(quad->op, "goto") != NULL) {
+    // Conditional branches (Phase 2 - Fixed)
+    else if (strcmp(quad->op, "IF_TRUE_GOTO") == 0 || 
+             strcmp(quad->op, "IF_FALSE_GOTO") == 0 ||
+             strcmp(quad->op, "IF_TRUE_GOTO_FLOAT") == 0 ||
+             strcmp(quad->op, "IF_FALSE_GOTO_FLOAT") == 0) {
         translateConditionalBranch(codegen, quad, irIndex);
     }
     // Unconditional jump
