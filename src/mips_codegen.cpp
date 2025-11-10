@@ -1077,10 +1077,29 @@ void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
 }
 
 /**
+ * Sanitize label name for MIPS compatibility
+ * Replace invalid characters like single quotes with underscores
+ */
+void sanitizeLabelName(const char* input, char* output) {
+    int j = 0;
+    for (int i = 0; input[i] != '\0' && i < 127; i++) {
+        char c = input[i];
+        // Replace single quotes, spaces, and other special chars with underscore
+        if (c == '\'' || c == ' ' || c == '"' || c == '.' || c == ',') {
+            output[j++] = '_';
+        } else {
+            output[j++] = c;
+        }
+    }
+    output[j] = '\0';
+}
+
+/**
  * Translate label
  */
 void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad) {
     char label[128];
+    char sanitized[128];
     
     // Labels can be stored in different formats:
     // 1. op="LABEL", arg1="L0" (standard format from IR file)
@@ -1096,7 +1115,8 @@ void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad) {
     }
     
     if (labelName != NULL) {
-        sprintf(label, "%s:", labelName);
+        sanitizeLabelName(labelName, sanitized);
+        sprintf(label, "%s:", sanitized);
         emitMIPS(codegen, label);
     }
 }
@@ -1106,6 +1126,7 @@ void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad) {
  */
 void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad) {
     char instr[128];
+    char sanitized[128];
     
     // The label can be in result OR arg1 depending on IR format
     // Labels can start with 'L' (L0, L1) or be named (skip_section, loop_end, etc.)
@@ -1120,7 +1141,8 @@ void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad) {
     }
     
     if (label != NULL && strlen(label) > 0) {
-        sprintf(instr, "    j %s", label);
+        sanitizeLabelName(label, sanitized);
+        sprintf(instr, "    j %s", sanitized);
         emitMIPS(codegen, instr);
     } else {
         // This should rarely happen - debug info
@@ -1134,6 +1156,7 @@ void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad) {
  */
 void translateConditionalBranch(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     char instr[256];
+    char sanitized[128];
     
     // Get register for condition variable
     int regCond = getReg(codegen, quad->arg1, irIndex);
@@ -1141,28 +1164,31 @@ void translateConditionalBranch(MIPSCodeGenerator* codegen, Quadruple* quad, int
     // The target label is in arg2 for conditional branches
     const char* targetLabel = quad->arg2;
     
+    // Sanitize label name (remove quotes, etc.)
+    sanitizeLabelName(targetLabel, sanitized);
+    
     // Check the opcode to determine branch type
     if (strcmp(quad->op, "IF_TRUE_GOTO") == 0) {
         // Branch if condition is true (not zero)
-        sprintf(instr, "    bnez %s, %s", getRegisterName(regCond), targetLabel);
+        sprintf(instr, "    bnez %s, %s", getRegisterName(regCond), sanitized);
     } 
     else if (strcmp(quad->op, "IF_FALSE_GOTO") == 0) {
         // Branch if condition is false (zero)
-        sprintf(instr, "    beqz %s, %s", getRegisterName(regCond), targetLabel);
+        sprintf(instr, "    beqz %s, %s", getRegisterName(regCond), sanitized);
     }
     else if (strcmp(quad->op, "IF_TRUE_GOTO_FLOAT") == 0) {
         // Branch if float condition is true (not zero)
         // For now, treat same as integer (proper float handling would use FPU)
-        sprintf(instr, "    bnez %s, %s", getRegisterName(regCond), targetLabel);
+        sprintf(instr, "    bnez %s, %s", getRegisterName(regCond), sanitized);
     }
     else if (strcmp(quad->op, "IF_FALSE_GOTO_FLOAT") == 0) {
         // Branch if float condition is false (zero)
-        sprintf(instr, "    beqz %s, %s", getRegisterName(regCond), targetLabel);
+        sprintf(instr, "    beqz %s, %s", getRegisterName(regCond), sanitized);
     }
     else {
         // Fallback - shouldn't happen but handle gracefully
         fprintf(stderr, "Warning: Unknown conditional branch op: %s\n", quad->op);
-        sprintf(instr, "    beqz %s, %s", getRegisterName(regCond), targetLabel);
+        sprintf(instr, "    beqz %s, %s", getRegisterName(regCond), sanitized);
     }
     
     emitMIPS(codegen, instr);
