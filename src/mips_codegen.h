@@ -126,6 +126,7 @@ typedef struct MIPSCodeGenerator {
     ActivationRecord* currentFunction;
     
     // Code generation state
+    FILE* outputFile;
     int currentBlock;
     bool inFunction;
     char currentFuncName[128];
@@ -168,6 +169,11 @@ void printActivationRecords(MIPSCodeGenerator* codegen);
  * Test activation record computation (called from main.cpp)
  */
 void testActivationRecords();
+
+/**
+ * Test MIPS code generation (called from main.cpp)
+ */
+void testMIPSCodeGeneration();
 
 /**
  * Calculate frame size for a function
