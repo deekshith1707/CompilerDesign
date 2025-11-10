@@ -1,0 +1,21 @@
+//Typedef, enum and union
+#include <stdio.h>
+
+typedef enum {MONDAY, TUESDAY, WEDNESDAY} Day;
+
+typedef union {
+    int i;
+    float f;
+} Data;
+
+int main() {
+    Day today = TUESDAY;
+    printf("Today is day number: %d\n", today);
+
+    Data data_union;
+    data_union.i = 100;
+    printf("Union as integer: %d\n", data_union.i);
+    data_union.f = 12.5;
+    printf("Union as float: %f\n", data_union.f);
+    return 0;
+}

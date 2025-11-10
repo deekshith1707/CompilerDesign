@@ -1,0 +1,10 @@
+//Incorrect array and pointer declaration
+#include <stdio.h>
+
+int main() {
+    int numbers[5] = {1, 2, 3, 4, 5};
+
+    int *ptr const = &numbers;
+
+    return 0;
+}

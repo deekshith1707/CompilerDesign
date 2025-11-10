@@ -1,0 +1,21 @@
+// switch cases and go to
+#include <stdio.h>
+
+int main() {
+    int choice = 2;
+
+    switch(choice) {
+        case 1:
+            printf("Case 1.\n");
+            goto end_switch;
+        case 2:
+            printf("Case 2.\n");
+            break;
+        default:
+            printf("Default.\n");
+    }
+
+end_switch:
+    printf("End of switch statement.\n");
+    return 0;
+}

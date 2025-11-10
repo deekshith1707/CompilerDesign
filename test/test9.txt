@@ -1,0 +1,13 @@
+//invalid function call with break
+#include <stdio.h>
+
+int my_function() {
+    // SYNTAX ERROR: 'break' outside of a loop or switch.
+    break;
+    return 1;
+}
+
+int main() {
+    int result = (1 + 2) * break;
+    return 0;
+}
