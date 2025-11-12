@@ -883,11 +883,31 @@ void loadVariable(MIPSCodeGenerator* codegen, const char* varName, int regNum) {
         
         // Handle character literals
         if (varName[0] == '\'') {
-            // Extract ASCII value from 'X'
+            // Extract ASCII value from 'X' or '\X' for escape sequences
             if (strlen(varName) >= 3) {
-                int asciiValue = (int)varName[1];
-                sprintf(instr, "    li %s, %d    # '%c'", 
-                        getRegisterName(regNum), asciiValue, varName[1]);
+                int asciiValue;
+                char displayChar;
+                
+                if (varName[1] == '\\' && strlen(varName) >= 4) {
+                    // Escape sequence like '\0', '\n', '\t', etc.
+                    switch (varName[2]) {
+                        case '0': asciiValue = 0; displayChar = '0'; break;   // null
+                        case 'n': asciiValue = 10; displayChar = 'n'; break;  // newline
+                        case 't': asciiValue = 9; displayChar = 't'; break;   // tab
+                        case 'r': asciiValue = 13; displayChar = 'r'; break;  // carriage return
+                        case '\\': asciiValue = 92; displayChar = '\\'; break; // backslash
+                        case '\'': asciiValue = 39; displayChar = '\''; break; // single quote
+                        case '"': asciiValue = 34; displayChar = '"'; break;  // double quote
+                        default: asciiValue = (int)varName[2]; displayChar = varName[2]; break;
+                    }
+                    sprintf(instr, "    li %s, %d    # '\\%c'", 
+                            getRegisterName(regNum), asciiValue, displayChar);
+                } else {
+                    // Regular character like 'A', 'B', etc.
+                    asciiValue = (int)varName[1];
+                    sprintf(instr, "    li %s, %d    # '%c'", 
+                            getRegisterName(regNum), asciiValue, varName[1]);
+                }
                 emitMIPS(codegen, instr);
                 return;
             }
