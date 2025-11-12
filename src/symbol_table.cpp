@@ -751,13 +751,8 @@ const char* getDisplayType(const Symbol* sym) {
 }
 
 void printSymbolTable() {
-    cout << "\n=== SYMBOL TABLE (User-Defined Symbols Only) ===" << endl;
-    cout << left << setw(20) << "Name"
-         << setw(20) << "Type"
-         << setw(20) << "Kind"
-         << setw(5) << "Scope"
-         << setw(20) << "Parent"
-         << setw(4) << "Size" << endl;
+    cout << "\n=== SYMBOL TABLE ===" << endl;
+    cout << left << setw(20) << "Name" << setw(20) << "Type" << setw(20) << "Kind" << setw(5) << "Scope" << setw(20) << "Parent" << setw(4) << "Size" << endl;
     cout << string(89, '-') << endl;
     
     // Count user-defined symbols in global scope
@@ -770,7 +765,7 @@ void printSymbolTable() {
     
     // Print global scope (0) - only user-defined symbols
     if (global_user_symbols > 0) {
-        cout << ">>> GLOBAL SCOPE (0) <<<" << endl;
+        cout << ">>> GLOBAL <<<" << endl;
         for (int i = 0; i < symCount; i++) {
             if (symtab[i].scope_level == 0 && !symtab[i].is_external) {
                 const char* display_type;
@@ -829,7 +824,7 @@ void printSymbolTable() {
                     processed_count++;
                     
                     // Print header for this function
-                    cout << ">>> SCOPE LEVEL 1 (" << func_name << ") <<<" << endl;
+                    cout << ">>> " << func_name << " <<<" << endl;
                     
                     // Print all symbols in this function's scope
                     for (int j = 0; j < symCount; j++) {
@@ -929,8 +924,7 @@ void printSymbolTable() {
     }
     
     cout << string(89, '-') << endl;
-    cout << "User-defined symbols: " << user_symbol_count << " | Max scope level: " << max_scope << endl;
-    cout << "External functions available: " << (symCount - user_symbol_count) << " (standard library)" << endl << endl;
+    cout << "Symbols: " << user_symbol_count << " | Max scope: " << max_scope << " | External: " << (symCount - user_symbol_count) << endl;
 }
 
 // ===== ENHANCED TYPE CHECKING FUNCTIONS =====
