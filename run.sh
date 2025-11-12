@@ -21,11 +21,25 @@ for c_file in ${TEST_DIR}/*.c; do
     fi
 done
 
-# Run IR Generator on all .txt files
+echo "============================================"
+echo "Generating IR and MIPS Assembly files..."
+echo "============================================"
+
+# Generate both IR and MIPS assembly files for all test cases
 for test_file in $(ls -1v ${TEST_DIR}/*.txt); do
     echo "--------------------------------------------"
-    echo "Running IR Generator on: ${test_file}"
+    echo "Processing: ${test_file}"
     echo "--------------------------------------------"
-    ./ir_generator "${test_file}"
+    ./ir_generator "${test_file}" --generate-mips
+    
+    # Get base filename and copy output.s to test directory
+    base=$(basename "${test_file}" .txt)
+    cp output.s "${TEST_DIR}/${base}.s"
+    echo "Created: ${TEST_DIR}/${base}.s"
     echo ""
 done
+
+echo ""
+echo "============================================"
+echo "All .s files generated successfully!"
+echo "============================================"
