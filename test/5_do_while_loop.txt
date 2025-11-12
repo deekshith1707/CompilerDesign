@@ -90,8 +90,8 @@ int main() {
         valid_ptr = NULL;
     } while (valid_ptr);            // Valid: pointer as condition
     
-    do { } while ("hello");      // Infinte loop
-    do { } while (arr);          // Infinte loop
+    // do { } while ("hello");      // Infinte loop
+    // do { } while (arr);          // Infinte loop
     
     return 0;
 }

@@ -83,8 +83,8 @@ int main() {
         // This won't execute
     }
     
-    while ("hello") { }          // Infinite loop
-    while (arr) { }              // Infinite loop
+    // while ("hello") { }          // Infinite loop
+    // while (arr) { }              // Infinite loop
     
     return 0;
 }

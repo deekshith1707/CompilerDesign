@@ -59,8 +59,8 @@ int main() {
     }
     // printf("%d\n", local_var);          // ERROR: local_var not in scope
     
-    for (char* str = "hello"; str; str++) { }  // infinite loop
-    for (i = 0; "hello"; i++) { }              // infinite loop
+    // for (char* str = "hello"; str; str++) { }  // infinite loop
+    // for (i = 0; "hello"; i++) { }              // infinite loop
     
     return 0;
 }
