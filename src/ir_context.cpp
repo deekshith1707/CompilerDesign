@@ -405,9 +405,5 @@ void printIR(const char* filename) {
     }
     
     fp.close();
-    cerr << "\nIntermediate code written to: " << filename << endl;
-    cerr << "Total IR instructions: " << irCount << endl;
-    if (staticVarCount > 0) {
-        cerr << "Static variables: " << staticVarCount << endl;
-    }
+    cerr << "IR: " << filename << " (" << irCount << " instructions)" << endl;
 }
