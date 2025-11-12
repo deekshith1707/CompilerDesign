@@ -2740,6 +2740,12 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
     else if (strcmp(quad->op, "ASSIGN_DEREF") == 0) {
         translateAssignDeref(codegen, quad, irIndex);
     }
+    // CAST operations - treat as simple move/assign
+    // In MIPS, char and int are both stored in 32-bit registers, so casting is just moving the value
+    else if (strstr(quad->op, "CAST") != NULL) {
+        // CAST is just a register move: load arg1 into a register, then store to result
+        translateAssignment(codegen, quad, irIndex);
+    }
 }
 
 /**
