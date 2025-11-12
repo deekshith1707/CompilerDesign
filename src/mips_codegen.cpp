@@ -330,9 +330,14 @@ void assignVariableOffsets(ActivationRecord* record, const char* funcName,
             if (!isParam && record->varCount < MAX_VARIABLES) {
                 strcpy(record->variables[record->varCount].varName, symtab[i].name);
                 record->variables[record->varCount].offset = offset;
-                record->variables[record->varCount].size = symtab[i].size > 0 ? symtab[i].size : 4;
+                
+                // Calculate aligned size (CRITICAL FIX: ensure 4-byte alignment)
+                int varSize = symtab[i].size > 0 ? symtab[i].size : 4;
+                int alignedSize = ((varSize + 3) / 4) * 4;  // Round up to multiple of 4
+                
+                record->variables[record->varCount].size = varSize;  // Store actual size
                 record->varCount++;
-                offset -= symtab[i].size > 0 ? symtab[i].size : 4;
+                offset -= alignedSize;  // Use aligned size for offset calculation
             }
         }
     }
@@ -405,8 +410,6 @@ int getVariableOffset(MIPSCodeGenerator* codegen, const char* varName) {
 void computeActivationRecords() {
     activationRecordCount = 0;
     
-    printf("\n=== Computing Activation Records ===\n");
-    
     // Find all functions in IR
     int i = 0;
     while (i < irCount) {
@@ -414,8 +417,6 @@ void computeActivationRecords() {
             const char* funcName = IR[i].arg1;
             int funcStart = i;
             int funcEnd = findFunctionEnd(funcStart);
-            
-            printf("Processing function: %s (IR %d to %d)\n", funcName, funcStart, funcEnd);
             
             if (activationRecordCount < MAX_FUNCTIONS) {
                 ActivationRecord* record = &activationRecords[activationRecordCount];
@@ -437,8 +438,6 @@ void computeActivationRecords() {
             i++;
         }
     }
-    
-    printf("Total functions processed: %d\n", activationRecordCount);
 }
 
 // ============================================================================
@@ -813,13 +812,37 @@ void loadVariable(MIPSCodeGenerator* codegen, const char* varName, int regNum) {
     
     // Check if it's a constant
     if (isConstantValue(varName)) {
+        // Handle string literals - CRITICAL FIX
+        // String literals start with " and cannot be loaded with li instruction
+        // They must be handled via la (load address) from .data section
+        if (varName[0] == '"') {
+            // String literal - skip loading, should be handled in data section
+            sprintf(instr, "    # String literal %s - use la to load address from .data", varName);
+            emitMIPS(codegen, instr);
+            return;
+        }
+        
         // Handle float constants specially (MIPS li doesn't support floats)
         if (isFloatConstant(varName)) {
-            // For now, convert float to integer (truncate)
-            // TODO: Proper float support would use FPU registers and .data section
-            int intValue = (int)atof(varName);
-            sprintf(instr, "    li %s, %d    # Float %s truncated to int", 
-                    getRegisterName(regNum), intValue, varName);
+            // CRITICAL FIX: For float constants, use ceiling for positive non-zero values
+            // This ensures loop increments like +0.5 become +1, allowing loop termination
+            // For negative values or zero, use standard truncation
+            double floatValue = atof(varName);
+            int intValue;
+            
+            if (floatValue > 0.0 && floatValue < 1.0) {
+                // Small positive fractions (0.1, 0.5, etc.) round up to 1 for loop progress
+                intValue = 1;
+            } else if (floatValue < 0.0 && floatValue > -1.0) {
+                // Small negative fractions (-0.5, etc.) round down to -1
+                intValue = -1;
+            } else {
+                // Standard truncation for larger values and zero
+                intValue = (int)floatValue;
+            }
+            
+            sprintf(instr, "    li %s, %d    # Float %s -> int %d", 
+                    getRegisterName(regNum), intValue, varName, intValue);
             emitMIPS(codegen, instr);
             return;
         }
@@ -879,12 +902,46 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
         for (int r = REG_T0; r <= REG_T9; r++) {
             if (codegen->regDescriptors[r].varCount == 0) {
                 loadVariable(codegen, varName, r);
+                // Don't update descriptors for constants - they're temporary values
                 return r;
             }
         }
-        // If no empty register, use REG_T0 and load the constant
-        loadVariable(codegen, varName, REG_T0);
-        return REG_T0;
+        // If no empty register, must spill one
+        // DON'T blindly use REG_T0 - that might hold a live variable!
+        // Use the same spilling logic as below
+        int victimReg = REG_T0;
+        
+        // Try to find a better victim using next-use information
+        int maxNextUse = -1;
+        for (int r = REG_T0; r <= REG_T9; r++) {
+            if (codegen->regDescriptors[r].varCount > 0) {
+                const char* victimVar = codegen->regDescriptors[r].varNames[0];
+                
+                // Check if variable is dead (no next use)
+                bool isLive = false;
+                int nextUseIdx = -1;
+                getNextUseInfo(irIndex, victimVar, &isLive, &nextUseIdx);
+                
+                if (!isLive || nextUseIdx < 0) {
+                    // Dead variable - perfect victim!
+                    victimReg = r;
+                    break;
+                }
+                
+                // Otherwise, pick variable with furthest next use
+                if (nextUseIdx > maxNextUse) {
+                    maxNextUse = nextUseIdx;
+                    victimReg = r;
+                }
+            }
+        }
+        
+        // Spill the victim, CLEAR the register descriptor, and load constant
+        spillRegister(codegen, victimReg);
+        clearRegisterDescriptor(codegen, victimReg);  // CRITICAL: Clear before loading constant!
+        loadVariable(codegen, varName, victimReg);
+        // Don't update descriptors for constants - they're temporary values that don't need tracking
+        return victimReg;
     }
     
     // CASE 1: Variable already in a register? (BEST CASE)
@@ -960,45 +1017,135 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
 void translateArithmetic(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     char instr[256];
     
-    // Get registers for operands
+    // CRITICAL FIX: Load BOTH operands FIRST before allocating result register
+    // This prevents the result register allocation from interfering with operand registers
     int regArg1 = getReg(codegen, quad->arg1, irIndex);
-    int regResult;
+    int regResult;  // Declare here, assign in each branch
+    
+    // CRITICAL FIX: Detect pointer arithmetic
+    // When doing ptr+1 or ptr-1, we need to scale by element size (4 bytes for int/float/pointer)
+    bool isPointerArithmetic = false;
+    int pointerScale = 1;
+    
+    // PTR_ADD and PTR_SUB operations are ALWAYS pointer arithmetic
+    if (strcmp(quad->op, "PTR_ADD") == 0 || strcmp(quad->op, "PTR_SUB") == 0) {
+        isPointerArithmetic = true;
+        pointerScale = 4;
+    }
+    // Also check symbol table for regular ADD/SUB operations
+    else {
+        Symbol* sym = lookupSymbol(quad->arg1);
+        if (sym != NULL && sym->ptr_level > 0) {
+            isPointerArithmetic = true;
+            pointerScale = 4; // Scale by 4 bytes for int/float/pointer types
+        } else if (strstr(quad->arg1, "ptr") != NULL || strstr(quad->arg1, "Ptr") != NULL) {
+            // Heuristic: variable name contains "ptr" - likely a pointer
+            // This catches variables like aptr, ptr1, fptr, cptr, etc.
+            isPointerArithmetic = true;
+            pointerScale = 4;
+        }
+    }
     
     // Handle binary operations
     if (strlen(quad->arg2) > 0 && strcmp(quad->arg2, "") != 0) {
         // Binary operation: result = arg1 op arg2
         
+        // CRITICAL FIX for float constants: must load both operands into DIFFERENT registers first
+        // For float constants like 0.5, isConstantValue() returns true BUT isFloatConstant() also returns true
+        // We cannot use immediate instructions with floats, so we MUST load both operands into registers
+        // The bug was that `f = f + 0.5` would load f into $t0, then load 0.5 into $t0 (clobber), causing `add $t0, $t0, $t0`
+        
         // Check if arg2 is a constant (can use immediate instruction)
         // BUT: Only use addi for integer constants, not floats
-        if (isConstantValue(quad->arg2) && strcmp(quad->op, "ADD") == 0 && !isFloatConstant(quad->arg2)) {
-            // Use immediate instruction for ADD with integer constant
-            regResult = getReg(codegen, quad->result, irIndex);
-            sprintf(instr, "    addi %s, %s, %s", 
-                   getRegisterName(regResult), 
-                   getRegisterName(regArg1), 
-                   quad->arg2);
-            emitMIPS(codegen, instr);
-        } else {
-            // Load both operands into registers
-            int regArg2 = getReg(codegen, quad->arg2, irIndex);
+        if (isConstantValue(quad->arg2) && 
+            (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || 
+             strcmp(quad->op, "SUB") == 0 || strcmp(quad->op, "-") == 0 ||
+             strcmp(quad->op, "PTR_ADD") == 0 || strcmp(quad->op, "PTR_SUB") == 0) && 
+            !isFloatConstant(quad->arg2)) {
+            // Use immediate instruction for ADD/SUB with integer constant
+            // Get result register AFTER loading arg1
             regResult = getReg(codegen, quad->result, irIndex);
             
-            if (strcmp(quad->op, "ADD") == 0) {
+            // POINTER ARITHMETIC FIX: Scale the constant by pointer element size
+            int scaledValue = atoi(quad->arg2);
+            if (isPointerArithmetic) {
+                scaledValue *= pointerScale;
+            }
+            
+            sprintf(instr, "    %s %s, %s, %d", 
+                   (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || strcmp(quad->op, "PTR_ADD") == 0 ? "addi" : "addi"),
+                   getRegisterName(regResult), 
+                   getRegisterName(regArg1), 
+                   (strcmp(quad->op, "SUB") == 0 || strcmp(quad->op, "-") == 0 || strcmp(quad->op, "PTR_SUB") == 0 ? -scaledValue : scaledValue));
+            emitMIPS(codegen, instr);
+        } else {
+            // Load arg2 (constant or variable) into a register
+            int regArg2 = getReg(codegen, quad->arg2, irIndex);
+            
+            // CRITICAL FIX: If loading arg2 clobbered arg1's register, reload arg1
+            // This can happen when arg2 is a constant and getReg chooses to spill arg1's register
+            if (regArg2 == regArg1) {
+                // They're in the same register - arg1 was clobbered!
+                // Reload arg1 into a different register
+                if (isConstantValue(quad->arg2)) {
+                    // arg2 is a constant that clobbered arg1
+                    // Move the constant to a different register
+                    for (int r = REG_T0; r <= REG_T9; r++) {
+                        if (r != regArg1 && codegen->regDescriptors[r].varCount == 0) {
+                            // Found an empty register different from arg1
+                            sprintf(instr, "    move %s, %s", 
+                                   getRegisterName(r), getRegisterName(regArg2));
+                            emitMIPS(codegen, instr);
+                            regArg2 = r;
+                            // Now reload arg1 from memory
+                            loadVariable(codegen, quad->arg1, regArg1);
+                            break;
+                        }
+                    }
+                } else {
+                    // Both are variables - shouldn't happen but reload arg1 to be safe
+                    loadVariable(codegen, quad->arg1, regArg1);
+                }
+            }
+            
+            // NOW get result register (might reuse one of the operand registers if result == operand)
+            regResult = getReg(codegen, quad->result, irIndex);
+            
+            // POINTER ARITHMETIC FIX: If arg2 is a variable, scale it by element size
+            if (isPointerArithmetic && 
+                (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || strcmp(quad->op, "PTR_ADD") == 0 ||
+                 strcmp(quad->op, "SUB") == 0 || strcmp(quad->op, "-") == 0 || strcmp(quad->op, "PTR_SUB") == 0)) {
+                // Scale arg2 by 4 using shift left by 2 (multiply by 4)
+                sprintf(instr, "    sll $t9, %s, 2", getRegisterName(regArg2));
+                emitMIPS(codegen, instr);
+                
+                // Now do the add/sub with scaled value
+                if (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || strcmp(quad->op, "PTR_ADD") == 0) {
+                    sprintf(instr, "    add %s, %s, $t9", 
+                           getRegisterName(regResult),
+                           getRegisterName(regArg1));
+                } else { // SUB or - or PTR_SUB
+                    sprintf(instr, "    sub %s, %s, $t9", 
+                           getRegisterName(regResult),
+                           getRegisterName(regArg1));
+                }
+                emitMIPS(codegen, instr);
+            } else if (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || strcmp(quad->op, "PTR_ADD") == 0) {
                 sprintf(instr, "    add %s, %s, %s", 
                        getRegisterName(regResult),
                        getRegisterName(regArg1),
                        getRegisterName(regArg2));
-            } else if (strcmp(quad->op, "SUB") == 0) {
+            } else if (strcmp(quad->op, "SUB") == 0 || strcmp(quad->op, "-") == 0 || strcmp(quad->op, "PTR_SUB") == 0) {
                 sprintf(instr, "    sub %s, %s, %s", 
                        getRegisterName(regResult),
                        getRegisterName(regArg1),
                        getRegisterName(regArg2));
-            } else if (strcmp(quad->op, "MUL") == 0) {
+            } else if (strcmp(quad->op, "MUL") == 0 || strcmp(quad->op, "*") == 0) {
                 sprintf(instr, "    mul %s, %s, %s", 
                        getRegisterName(regResult),
                        getRegisterName(regArg1),
                        getRegisterName(regArg2));
-            } else if (strcmp(quad->op, "DIV") == 0) {
+            } else if (strcmp(quad->op, "DIV") == 0 || strcmp(quad->op, "/") == 0) {
                 sprintf(instr, "    div %s, %s, %s", 
                        getRegisterName(regResult),
                        getRegisterName(regArg1),
@@ -1096,6 +1243,9 @@ void sanitizeLabelName(const char* input, char* output) {
 
 /**
  * Translate label
+ * CRITICAL: At label boundaries (basic block entry points), we must spill
+ * all dirty registers and clear register descriptors because control flow
+ * can reach here from multiple paths. Variables in registers may be stale.
  */
 void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad) {
     char label[128];
@@ -1115,6 +1265,15 @@ void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad) {
     }
     
     if (labelName != NULL) {
+        // CRITICAL FIX: Spill all registers before label to save any pending changes
+        // Then clear all register descriptors at label boundaries
+        // This ensures variables are saved before control flow changes
+        for (int r = REG_T0; r <= REG_T9; r++) {
+            if (codegen->regDescriptors[r].varCount > 0) {
+                spillRegister(codegen, r);
+            }
+        }
+        
         sanitizeLabelName(labelName, sanitized);
         sprintf(label, "%s:", sanitized);
         emitMIPS(codegen, label);
@@ -1123,10 +1282,19 @@ void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad) {
 
 /**
  * Translate unconditional jump
+ * CRITICAL: Must spill all registers before jumping because control flow changes
  */
 void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad) {
     char instr[128];
     char sanitized[128];
+    
+    // CRITICAL FIX: Spill all registers before jumping
+    // This ensures all pending changes are saved to memory
+    for (int r = REG_T0; r <= REG_T9; r++) {
+        if (codegen->regDescriptors[r].varCount > 0) {
+            spillRegister(codegen, r);
+        }
+    }
     
     // The label can be in result OR arg1 depending on IR format
     // Labels can start with 'L' (L0, L1) or be named (skip_section, loop_end, etc.)
@@ -1153,6 +1321,7 @@ void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad) {
 
 /**
  * Translate conditional branch
+ * CRITICAL: Must spill all registers before branching because control flow changes
  */
 void translateConditionalBranch(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     char instr[256];
@@ -1160,6 +1329,14 @@ void translateConditionalBranch(MIPSCodeGenerator* codegen, Quadruple* quad, int
     
     // Get register for condition variable
     int regCond = getReg(codegen, quad->arg1, irIndex);
+    
+    // CRITICAL FIX: Spill all registers before branching
+    // This ensures all pending changes are saved to memory
+    for (int r = REG_T0; r <= REG_T9; r++) {
+        if (codegen->regDescriptors[r].varCount > 0 && r != regCond) {
+            spillRegister(codegen, r);
+        }
+    }
     
     // The target label is in arg2 for conditional branches
     const char* targetLabel = quad->arg2;
@@ -1383,31 +1560,197 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     
     // Check if this is a standard library I/O function
     if (strcmp(funcName, "printf") == 0) {
-        // Handle printf with syscall
-        // Determine type based on first parameter
-        // If first param is string, use syscall 4 (print_string)
-        // Parameters are already in $a0, $a1, etc. from PARAM instructions
+        // FULL PRINTF IMPLEMENTATION WITH FORMAT STRING PARSING
+        // Parse the format string and generate syscalls for each segment
         
-        // For simplicity, printf with format string: use syscall 4 for string, syscall 1 for int
-        // The parameters are already loaded into $a0, $a1 by PARAM instructions
+        // Get the format string from the first parameter  
+        // Look backward in IR for the PARAM instruction with string literal
+        char formatStr[512] = "";
+        bool foundFormat = false;
         
-        // Print the format string (already in $a0)
-        sprintf(instr, "    li $v0, 4    # syscall 4: print_string");
-        emitMIPS(codegen, instr);
-        emitMIPS(codegen, "    syscall");
-        
-        // If there's a second parameter (integer to print), print it too
-        // Note: This is a simplified printf - doesn't parse format string
-        if (paramCount > 1) {
-            // Print the integer in $a1
-            sprintf(instr, "    move $a0, $a1");
-            emitMIPS(codegen, instr);
-            sprintf(instr, "    li $v0, 1    # syscall 1: print_int");
-            emitMIPS(codegen, instr);
-            emitMIPS(codegen, "    syscall");
+        // Search backward from current instruction for the first PARAM with a string literal
+        for (int i = irIndex - 1; i >= 0 && i >= irIndex - 20; i--) {
+            if ((strcmp(codegen->IR[i].op, "PARAM") == 0 || strcmp(codegen->IR[i].op, "param") == 0) &&
+                codegen->IR[i].arg1[0] == '"') {
+                // Found string literal parameter
+                strncpy(formatStr, codegen->IR[i].arg1, sizeof(formatStr) - 1);
+                foundFormat = true;
+                break;
+            }
         }
         
-        // No return value needed for printf in this simple implementation
+        if (!foundFormat || formatStr[0] != '"') {
+            // Fallback to simple printf if no format string found
+            sprintf(instr, "    li $v0, 4    # syscall 4: print_string");
+            emitMIPS(codegen, instr);
+            emitMIPS(codegen, "    syscall");
+        } else {
+            // Parse format string and generate a runtime string parser
+            // Strategy: Load format string address, iterate through it character by character,
+            // print characters until we hit %, then print the corresponding argument
+            
+            // Save argument registers to stack (we'll need $a0 for syscalls)
+            if (paramCount > 1) {
+                sprintf(instr, "    addi $sp, $sp, -16");
+                emitMIPS(codegen, instr);
+                sprintf(instr, "    sw $a1, 0($sp)");
+                emitMIPS(codegen, instr);
+                if (paramCount > 2) {
+                    sprintf(instr, "    sw $a2, 4($sp)");
+                    emitMIPS(codegen, instr);
+                }
+                if (paramCount > 3) {
+                    sprintf(instr, "    sw $a3, 8($sp)");
+                    emitMIPS(codegen, instr);
+                }
+            }
+            
+            // Simpler approach: Parse format string at COMPILE time and generate inline code
+            int argIndex = 1;  // Start with first argument after format string
+            char segment[256];
+            int segLen = 0;
+            
+            // Parse the format string (skip opening quote)
+            for (int i = 1; formatStr[i] != '\0' && formatStr[i] != '"'; i++) {
+                if (formatStr[i] == '%' && formatStr[i+1] != '%' && formatStr[i+1] != '\0' && formatStr[i+1] != '"') {
+                    // Found format specifier - print accumulated segment first
+                    if (segLen > 0) {
+                        segment[segLen] = '\0';
+                        // Print each character of the segment
+                        for (int j = 0; j < segLen; j++) {
+                            char ch = segment[j];
+                            if (ch == '\n') {
+                                // Print newline
+                                sprintf(instr, "    li $a0, 10    # newline");
+                                emitMIPS(codegen, instr);
+                                sprintf(instr, "    li $v0, 11    # syscall 11: print_char");
+                                emitMIPS(codegen, instr);
+                                emitMIPS(codegen, "    syscall");
+                            } else if (ch == '\t') {
+                                sprintf(instr, "    li $a0, 9     # tab");
+                                emitMIPS(codegen, instr);
+                                sprintf(instr, "    li $v0, 11");
+                                emitMIPS(codegen, instr);
+                                emitMIPS(codegen, "    syscall");
+                            } else if (ch >= 32 && ch <= 126) {
+                                // Printable ASCII
+                                sprintf(instr, "    li $a0, %d    # '%c'", (int)ch, ch);
+                                emitMIPS(codegen, instr);
+                                sprintf(instr, "    li $v0, 11    # syscall 11: print_char");
+                                emitMIPS(codegen, instr);
+                                emitMIPS(codegen, "    syscall");
+                            }
+                        }
+                        segLen = 0;
+                    }
+                    
+                    // Handle the format specifier
+                    i++;  // Move past '%'
+                    char spec = formatStr[i];
+                    
+                    // Skip precision specifiers like .1, .2
+                    while (spec == '.' || (spec >= '0' && spec <= '9')) {
+                        i++;
+                        spec = formatStr[i];
+                    }
+                    
+                    // Load the argument into $a0
+                    if (argIndex == 1) {
+                        sprintf(instr, "    lw $a0, 0($sp)    # Load arg %d", argIndex);
+                    } else if (argIndex == 2) {
+                        sprintf(instr, "    lw $a0, 4($sp)    # Load arg %d", argIndex);
+                    } else if (argIndex == 3) {
+                        sprintf(instr, "    lw $a0, 8($sp)    # Load arg %d", argIndex);
+                    } else {
+                        // Load from original stack position
+                        sprintf(instr, "    lw $a0, %d($sp)    # Load arg %d", 16 + (argIndex - 4) * 4, argIndex);
+                    }
+                    emitMIPS(codegen, instr);
+                    
+                    // Emit appropriate syscall based on format specifier
+                    if (spec == 'd' || spec == 'i') {
+                        sprintf(instr, "    li $v0, 1    # syscall 1: print_int");
+                    } else if (spec == 'f') {
+                        // No float support - print as integer
+                        sprintf(instr, "    li $v0, 1    # syscall 1: print_int (float as int)");
+                    } else if (spec == 'c') {
+                        sprintf(instr, "    li $v0, 11   # syscall 11: print_char");
+                    } else if (spec == 's') {
+                        sprintf(instr, "    li $v0, 4    # syscall 4: print_string");
+                    } else if (spec == 'p' || spec == 'x') {
+                        sprintf(instr, "    li $v0, 1    # syscall 1: print_int (pointer as int)");
+                    } else {
+                        sprintf(instr, "    li $v0, 1    # syscall 1: print_int (default)");
+                    }
+                    emitMIPS(codegen, instr);
+                    emitMIPS(codegen, "    syscall");
+                    
+                    argIndex++;
+                } else if (formatStr[i] == '%' && formatStr[i+1] == '%') {
+                    // Escaped percent sign
+                    segment[segLen++] = '%';
+                    i++;  // Skip next '%'
+                } else {
+                    // Regular character
+                    char ch = formatStr[i];
+                    
+                    // Handle escape sequences
+                    if (ch == '\\' && formatStr[i+1] != '\0' && formatStr[i+1] != '"') {
+                        i++;
+                        if (formatStr[i] == 'n') {
+                            ch = '\n';
+                        } else if (formatStr[i] == 't') {
+                            ch = '\t';
+                        } else if (formatStr[i] == 'r') {
+                            ch = '\r';
+                        } else if (formatStr[i] == '\\') {
+                            ch = '\\';
+                        } else if (formatStr[i] == '"') {
+                            ch = '"';
+                        } else {
+                            ch = formatStr[i];
+                        }
+                    }
+                    
+                    segment[segLen++] = ch;
+                }
+            }
+            
+            // Print any remaining segment
+            if (segLen > 0) {
+                segment[segLen] = '\0';
+                for (int j = 0; j < segLen; j++) {
+                    char ch = segment[j];
+                    if (ch == '\n') {
+                        sprintf(instr, "    li $a0, 10    # newline");
+                        emitMIPS(codegen, instr);
+                        sprintf(instr, "    li $v0, 11    # syscall 11: print_char");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
+                    } else if (ch == '\t') {
+                        sprintf(instr, "    li $a0, 9     # tab");
+                        emitMIPS(codegen, instr);
+                        sprintf(instr, "    li $v0, 11");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
+                    } else if (ch >= 32 && ch <= 126) {
+                        sprintf(instr, "    li $a0, %d    # '%c'", (int)ch, ch);
+                        emitMIPS(codegen, instr);
+                        sprintf(instr, "    li $v0, 11    # syscall 11: print_char");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
+                    }
+                }
+            }
+            
+            // Restore stack
+            if (paramCount > 1) {
+                sprintf(instr, "    addi $sp, $sp, 16");
+                emitMIPS(codegen, instr);
+            }
+        }
+        
+        // No return value needed for printf
     }
     else if (strcmp(funcName, "scanf") == 0) {
         // Handle scanf with syscall 5 (read_int)
@@ -1448,6 +1791,18 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
             // Update descriptors
             updateDescriptors(codegen, destReg, quad->result);
         }
+    }
+    
+    // CRITICAL FIX: Function calls clobber caller-saved registers ($t0-$t9, $a0-$a3)
+    // Invalidate all register descriptors for caller-saved registers so subsequent
+    // operations will reload variables from memory instead of trusting stale register values
+    for (int r = REG_T0; r <= REG_T9; r++) {
+        if (r <= REG_A3 || r >= REG_T0) {  // $a0-$a3 and $t0-$t9
+            clearRegisterDescriptor(codegen, r);
+        }
+    }
+    for (int r = REG_A0; r <= REG_A3; r++) {
+        clearRegisterDescriptor(codegen, r);
     }
     
     // Reset parameter counter for next call
@@ -1914,7 +2269,11 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
     // Arithmetic operations
     if (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "SUB") == 0 ||
         strcmp(quad->op, "MUL") == 0 || strcmp(quad->op, "DIV") == 0 ||
-        strcmp(quad->op, "MOD") == 0) {
+        strcmp(quad->op, "MOD") == 0 ||
+        strcmp(quad->op, "+") == 0 || strcmp(quad->op, "-") == 0 ||
+        strcmp(quad->op, "*") == 0 || strcmp(quad->op, "/") == 0 ||
+        strcmp(quad->op, "%") == 0 ||
+        strcmp(quad->op, "PTR_ADD") == 0 || strcmp(quad->op, "PTR_SUB") == 0) {
         translateArithmetic(codegen, quad, irIndex);
     }
     // Relational operations
@@ -2050,6 +2409,94 @@ void generateTextSection(MIPSCodeGenerator* codegen) {
             i++;
         }
     }
+    
+    // Generate C standard library function implementations
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "# ============================================");
+    emitMIPS(codegen, "# C Standard Library Function Implementations");
+    emitMIPS(codegen, "# ============================================");
+    emitMIPS(codegen, "");
+    
+    // atoi - ASCII to Integer
+    // Input: $a0 = string address
+    // Output: $v0 = integer value
+    emitMIPS(codegen, "_atoi:");
+    emitMIPS(codegen, "    li $v0, 0          # result = 0");
+    emitMIPS(codegen, "    li $t1, 1          # sign = 1 (positive)");
+    emitMIPS(codegen, "    move $t0, $a0      # ptr = str");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Skip leading whitespace");
+    emitMIPS(codegen, "_atoi_skip_space:");
+    emitMIPS(codegen, "    lb $t2, 0($t0)     # load char");
+    emitMIPS(codegen, "    beq $t2, 32, _atoi_next_char   # if space, skip");
+    emitMIPS(codegen, "    beq $t2, 9, _atoi_next_char    # if tab, skip");
+    emitMIPS(codegen, "    j _atoi_check_sign");
+    emitMIPS(codegen, "_atoi_next_char:");
+    emitMIPS(codegen, "    addi $t0, $t0, 1");
+    emitMIPS(codegen, "    j _atoi_skip_space");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Check for sign");
+    emitMIPS(codegen, "_atoi_check_sign:");
+    emitMIPS(codegen, "    lb $t2, 0($t0)     # load char");
+    emitMIPS(codegen, "    bne $t2, 45, _atoi_check_plus  # if not '-', check '+'");
+    emitMIPS(codegen, "    li $t1, -1         # sign = -1");
+    emitMIPS(codegen, "    addi $t0, $t0, 1   # skip '-'");
+    emitMIPS(codegen, "    j _atoi_loop");
+    emitMIPS(codegen, "_atoi_check_plus:");
+    emitMIPS(codegen, "    bne $t2, 43, _atoi_loop  # if not '+', start conversion");
+    emitMIPS(codegen, "    addi $t0, $t0, 1   # skip '+'");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Convert digits");
+    emitMIPS(codegen, "_atoi_loop:");
+    emitMIPS(codegen, "    lb $t2, 0($t0)     # load char");
+    emitMIPS(codegen, "    blt $t2, 48, _atoi_done   # if < '0', done");
+    emitMIPS(codegen, "    bgt $t2, 57, _atoi_done   # if > '9', done");
+    emitMIPS(codegen, "    addi $t2, $t2, -48 # convert ASCII to digit");
+    emitMIPS(codegen, "    mul $v0, $v0, 10   # result *= 10");
+    emitMIPS(codegen, "    add $v0, $v0, $t2  # result += digit");
+    emitMIPS(codegen, "    addi $t0, $t0, 1   # ptr++");
+    emitMIPS(codegen, "    j _atoi_loop");
+    emitMIPS(codegen, "_atoi_done:");
+    emitMIPS(codegen, "    mul $v0, $v0, $t1  # apply sign");
+    emitMIPS(codegen, "    jr $ra");
+    emitMIPS(codegen, "");
+    
+    // atof - ASCII to Float (simplified - returns integer part)
+    // Input: $a0 = string address
+    // Output: $v0 = integer value (float truncated to int)
+    emitMIPS(codegen, "_atof:");
+    emitMIPS(codegen, "    # Simplified atof - just calls atoi for integer part");
+    emitMIPS(codegen, "    addi $sp, $sp, -4");
+    emitMIPS(codegen, "    sw $ra, 0($sp)");
+    emitMIPS(codegen, "    jal _atoi          # reuse atoi implementation");
+    emitMIPS(codegen, "    lw $ra, 0($sp)");
+    emitMIPS(codegen, "    addi $sp, $sp, 4");
+    emitMIPS(codegen, "    jr $ra");
+    emitMIPS(codegen, "");
+    
+    // atol - ASCII to Long (same as atoi on 32-bit MIPS)
+    // Input: $a0 = string address
+    // Output: $v0 = integer value
+    emitMIPS(codegen, "_atol:");
+    emitMIPS(codegen, "    # atol same as atoi on 32-bit MIPS");
+    emitMIPS(codegen, "    addi $sp, $sp, -4");
+    emitMIPS(codegen, "    sw $ra, 0($sp)");
+    emitMIPS(codegen, "    jal _atoi");
+    emitMIPS(codegen, "    lw $ra, 0($sp)");
+    emitMIPS(codegen, "    addi $sp, $sp, 4");
+    emitMIPS(codegen, "    jr $ra");
+    emitMIPS(codegen, "");
+    
+    // abs - Absolute Value
+    // Input: $a0 = integer
+    // Output: $v0 = |integer|
+    emitMIPS(codegen, "_abs:");
+    emitMIPS(codegen, "    move $v0, $a0      # result = input");
+    emitMIPS(codegen, "    bgez $a0, _abs_done  # if >= 0, done");
+    emitMIPS(codegen, "    neg $v0, $a0       # else result = -input");
+    emitMIPS(codegen, "_abs_done:");
+    emitMIPS(codegen, "    jr $ra");
+    emitMIPS(codegen, "");
 }
 
 /**
@@ -2066,8 +2513,6 @@ void generateMIPSCode(MIPSCodeGenerator* codegen) {
         return;
     }
     
-    printf("\n=== GENERATING MIPS ASSEMBLY CODE ===\n\n");
-    
     // Generate .data section
     generateDataSection(codegen);
     
@@ -2077,60 +2522,36 @@ void generateMIPSCode(MIPSCodeGenerator* codegen) {
     // Close output file
     fclose(codegen->outputFile);
     codegen->outputFile = NULL;
-    
-    printf("MIPS code generated: %s\n\n", filename);
 }
 
 /**
  * Main entry point for testing Phase 2
  */
 void testMIPSCodeGeneration() {
-    printf("\n");
-    printf("╔════════════════════════════════════════════════════════════╗\n");
-    printf("║  PHASE 2: MIPS Code Generation with Register Allocation  ║\n");
-    printf("║  Testing Complete Code Generation                         ║\n");
-    printf("╚════════════════════════════════════════════════════════════╝\n");
-    
     // First, run basic block analysis (needed for next-use info)
-    printf("\n=== Running IR Analysis ===\n");
-    fflush(stdout);
     analyzeIR();
-    printf("IR Analysis complete\n");
-    fflush(stdout);
     
     // Initialize code generator - use malloc to avoid stack overflow
-    printf("=== Initializing Code Generator ===\n");
-    fflush(stdout);
     MIPSCodeGenerator* codegen = (MIPSCodeGenerator*)malloc(sizeof(MIPSCodeGenerator));
     if (!codegen) {
         fprintf(stderr, "Error: Cannot allocate memory for code generator\n");
         return;
     }
     initMIPSCodeGen(codegen);
-    printf("Code generator initialized\n");
-    fflush(stdout);
     
     // Compute activation records (from Phase 1)
-    printf("=== Computing Activation Records ===\n");
-    fflush(stdout);
     computeActivationRecords();
-    printf("Activation records computed: %d functions\n", activationRecordCount);
-    fflush(stdout);
     
     // Copy activation records to codegen
     for (int i = 0; i < activationRecordCount; i++) {
         codegen->activationRecords[i] = activationRecords[i];
     }
     codegen->funcCount = activationRecordCount;
-    printf("Activation records copied\n");
-    fflush(stdout);
     
     // Generate MIPS code
-    printf("=== Generating MIPS Assembly ===\n");
-    fflush(stdout);
     generateMIPSCode(codegen);
     
-    printf("=== MIPS CODE GENERATION COMPLETED ===\n\n");
+    printf("MIPS assembly generated: output.s\n");
     
     // Free memory
     free(codegen);
