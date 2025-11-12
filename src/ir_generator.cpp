@@ -1458,6 +1458,17 @@ char* generate_ir(TreeNode* node) {
             
             bool is_pointer_arithmetic = false;
             bool is_ptr_ptr_subtraction = false;
+            bool left_is_array_name = false;
+            
+            // Check if left operand is an array name (not subscripted)
+            if (node->children[0]->type == NODE_IDENTIFIER) {
+                Symbol* sym = lookupSymbol(node->children[0]->value);
+                if (sym && sym->is_array) {
+                    left_is_array_name = true;
+                    is_pointer_arithmetic = true;
+                }
+            }
+            
             if (node->children[0]->dataType && node->children[1]->dataType) {
                 bool left_is_pointer = (strchr(node->children[0]->dataType, '*') != nullptr);
                 bool right_is_pointer = (strchr(node->children[1]->dataType, '*') != nullptr);
@@ -1475,7 +1486,12 @@ char* generate_ir(TreeNode* node) {
             if (strcmp(node->value, "+") == 0) {
                 if (is_pointer_arithmetic) {
                     char* temp = newTemp();
-                    emit("PTR_ADD", left, right, temp);
+                    // For array names with integer offset, use ARRAY_ADDR for better code generation
+                    if (left_is_array_name) {
+                        emit("ARRAY_ADDR", left, right, temp);
+                    } else {
+                        emit("PTR_ADD", left, right, temp);
+                    }
                     return temp;
                 } else {
                     if (node->children[0]->dataType && node->children[1]->dataType) {
@@ -1497,7 +1513,24 @@ char* generate_ir(TreeNode* node) {
                     return temp;
                 } else if (is_pointer_arithmetic) {
                     char* temp = newTemp();
-                    emit("PTR_SUB", left, right, temp);
+                    // For array names with integer offset, could use ARRAY_ADDR with negative index
+                    // but PTR_SUB works fine too since the codegen handles it
+                    if (left_is_array_name) {
+                        // Convert arr - 3 to ARRAY_ADDR arr, -3, temp
+                        // Need to negate the right operand
+                        char negated[64];
+                        if (isdigit(right[0]) || right[0] == '-') {
+                            // Constant - can negate directly
+                            int val = atoi(right);
+                            sprintf(negated, "%d", -val);
+                            emit("ARRAY_ADDR", left, negated, temp);
+                        } else {
+                            // Variable - use PTR_SUB
+                            emit("PTR_SUB", left, right, temp);
+                        }
+                    } else {
+                        emit("PTR_SUB", left, right, temp);
+                    }
                     return temp;
                 } else {
                     if (node->children[0]->dataType && node->children[1]->dataType) {

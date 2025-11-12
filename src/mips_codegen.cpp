@@ -400,6 +400,40 @@ int getVariableOffset(MIPSCodeGenerator* codegen, const char* varName) {
     return 0;
 }
 
+/**
+ * Get element size and type for an array from symbol table
+ * Returns: element size in bytes
+ * Sets isCharArray to true if it's a char array
+ */
+int getArrayElementInfo(const char* arrayName, bool* isCharArray) {
+    *isCharArray = false;  // Default to non-char array
+    
+    // Search symbol table for the array
+    for (int i = 0; i < symCount; i++) {
+        if (strcmp(symtab[i].name, arrayName) == 0) {
+            // Check if it's a char array
+            if (strstr(symtab[i].type, "char") != NULL) {
+                *isCharArray = true;
+                return 1;  // char elements are 1 byte
+            }
+            // Check for pointer types (int*, char*, etc.)
+            if (strstr(symtab[i].type, "*") != NULL) {
+                // In MIPS32, all pointers are 4 bytes (32-bit addresses)
+                // For pointer arithmetic (ptr + 1), we need the size of the pointed-to type
+                if (strstr(symtab[i].type, "char") != NULL) {
+                    return 1;  // char* pointer arithmetic: ptr+1 adds 1 byte
+                }
+                return 4;  // int*, float*, other* pointer arithmetic: ptr+1 adds 4 bytes
+            }
+            // Default: int, float, etc. are 4 bytes
+            return 4;
+        }
+    }
+    
+    // Not found in symbol table - default to 4 bytes
+    return 4;
+}
+
 // ============================================================================
 // Task 1.4: Build Activation Records for All Functions
 // ============================================================================
@@ -1016,34 +1050,60 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
  */
 void translateArithmetic(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     char instr[256];
-    
-    // CRITICAL FIX: Load BOTH operands FIRST before allocating result register
-    // This prevents the result register allocation from interfering with operand registers
-    int regArg1 = getReg(codegen, quad->arg1, irIndex);
     int regResult;  // Declare here, assign in each branch
     
-    // CRITICAL FIX: Detect pointer arithmetic
-    // When doing ptr+1 or ptr-1, we need to scale by element size (4 bytes for int/float/pointer)
+    // CRITICAL FIX: Detect pointer arithmetic FIRST before loading arg1
+    // When doing ptr+1 or arr+3, we need to get the ADDRESS, not the VALUE
     bool isPointerArithmetic = false;
     int pointerScale = 1;
+    bool arg1IsArray = false;
     
     // PTR_ADD and PTR_SUB operations are ALWAYS pointer arithmetic
     if (strcmp(quad->op, "PTR_ADD") == 0 || strcmp(quad->op, "PTR_SUB") == 0) {
         isPointerArithmetic = true;
-        pointerScale = 4;
+        // Determine element size based on pointer type
+        bool isCharArray = false;
+        int elementSize = getArrayElementInfo(quad->arg1, &isCharArray);
+        pointerScale = elementSize;
     }
     // Also check symbol table for regular ADD/SUB operations
     else {
         Symbol* sym = lookupSymbol(quad->arg1);
-        if (sym != NULL && sym->ptr_level > 0) {
+        if (sym != NULL && (sym->ptr_level > 0 || sym->is_array)) {
             isPointerArithmetic = true;
-            pointerScale = 4; // Scale by 4 bytes for int/float/pointer types
+            arg1IsArray = sym->is_array;  // Remember if it's an array
+            // Determine element size based on pointer/array type
+            bool isCharArray = false;
+            int elementSize = getArrayElementInfo(quad->arg1, &isCharArray);
+            pointerScale = elementSize;  // 1 for char, 4 for int/float/pointer
         } else if (strstr(quad->arg1, "ptr") != NULL || strstr(quad->arg1, "Ptr") != NULL) {
             // Heuristic: variable name contains "ptr" - likely a pointer
             // This catches variables like aptr, ptr1, fptr, cptr, etc.
             isPointerArithmetic = true;
-            pointerScale = 4;
+            bool isCharArray = false;
+            int elementSize = getArrayElementInfo(quad->arg1, &isCharArray);
+            pointerScale = elementSize;  // 1 for char, 4 for int/float/pointer
         }
+    }
+    
+    // Load arg1: For arrays in pointer arithmetic, compute ADDRESS; for others, load VALUE
+    int regArg1;
+    if (isPointerArithmetic && arg1IsArray) {
+        // arg1 is an array name - compute its address, not load its value
+        int offset = getVariableOffset(codegen, quad->arg1);
+        regArg1 = REG_T0;  // Use a temporary register
+        for (int r = REG_T0; r <= REG_T9; r++) {
+            if (codegen->regDescriptors[r].varCount == 0) {
+                regArg1 = r;
+                break;
+            }
+        }
+        sprintf(instr, "    addi %s, $fp, %d", getRegisterName(regArg1), offset);
+        emitMIPS(codegen, instr);
+        // Don't update descriptors - this is a temporary address computation
+    } else {
+        // Regular variable or pointer - load its value
+        regArg1 = getReg(codegen, quad->arg1, irIndex);
     }
     
     // Handle binary operations
@@ -1115,21 +1175,55 @@ void translateArithmetic(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
             if (isPointerArithmetic && 
                 (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || strcmp(quad->op, "PTR_ADD") == 0 ||
                  strcmp(quad->op, "SUB") == 0 || strcmp(quad->op, "-") == 0 || strcmp(quad->op, "PTR_SUB") == 0)) {
-                // Scale arg2 by 4 using shift left by 2 (multiply by 4)
-                sprintf(instr, "    sll $t9, %s, 2", getRegisterName(regArg2));
-                emitMIPS(codegen, instr);
-                
-                // Now do the add/sub with scaled value
-                if (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || strcmp(quad->op, "PTR_ADD") == 0) {
-                    sprintf(instr, "    add %s, %s, $t9", 
-                           getRegisterName(regResult),
-                           getRegisterName(regArg1));
-                } else { // SUB or - or PTR_SUB
-                    sprintf(instr, "    sub %s, %s, $t9", 
-                           getRegisterName(regResult),
-                           getRegisterName(regArg1));
+                // Scale arg2 by element size (1 for char, 4 for int/float/pointer)
+                if (pointerScale == 1) {
+                    // No scaling needed for char arrays - use arg2 directly
+                    if (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || strcmp(quad->op, "PTR_ADD") == 0) {
+                        sprintf(instr, "    add %s, %s, %s", 
+                               getRegisterName(regResult),
+                               getRegisterName(regArg1),
+                               getRegisterName(regArg2));
+                    } else { // SUB or - or PTR_SUB
+                        sprintf(instr, "    sub %s, %s, %s", 
+                               getRegisterName(regResult),
+                               getRegisterName(regArg1),
+                               getRegisterName(regArg2));
+                    }
+                    emitMIPS(codegen, instr);
+                } else if (pointerScale == 4) {
+                    // Scale arg2 by 4 using shift left by 2 (multiply by 4)
+                    sprintf(instr, "    sll $t9, %s, 2", getRegisterName(regArg2));
+                    emitMIPS(codegen, instr);
+                    
+                    // Now do the add/sub with scaled value
+                    if (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || strcmp(quad->op, "PTR_ADD") == 0) {
+                        sprintf(instr, "    add %s, %s, $t9", 
+                               getRegisterName(regResult),
+                               getRegisterName(regArg1));
+                    } else { // SUB or - or PTR_SUB
+                        sprintf(instr, "    sub %s, %s, $t9", 
+                               getRegisterName(regResult),
+                               getRegisterName(regArg1));
+                    }
+                    emitMIPS(codegen, instr);
+                } else {
+                    // Other scales (e.g., 2, 8) - use multiplication
+                    sprintf(instr, "    li $t9, %d", pointerScale);
+                    emitMIPS(codegen, instr);
+                    sprintf(instr, "    mul $t9, %s, $t9", getRegisterName(regArg2));
+                    emitMIPS(codegen, instr);
+                    
+                    if (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || strcmp(quad->op, "PTR_ADD") == 0) {
+                        sprintf(instr, "    add %s, %s, $t9", 
+                               getRegisterName(regResult),
+                               getRegisterName(regArg1));
+                    } else { // SUB or - or PTR_SUB
+                        sprintf(instr, "    sub %s, %s, $t9", 
+                               getRegisterName(regResult),
+                               getRegisterName(regArg1));
+                    }
+                    emitMIPS(codegen, instr);
                 }
-                emitMIPS(codegen, instr);
             } else if (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0 || strcmp(quad->op, "PTR_ADD") == 0) {
                 sprintf(instr, "    add %s, %s, %s", 
                        getRegisterName(regResult),
@@ -1182,6 +1276,55 @@ void translateArithmetic(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
  */
 void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     char instr[256];
+    
+    // CRITICAL FIX: Detect pointer-to-array assignment using activation record info
+    // In C, when you assign an array name to a pointer (ptr = array), you're assigning the ADDRESS
+    // We detect this by checking sizes in activation record:
+    // - Arrays have large size (> 4 bytes)
+    // - Pointers/scalars have small size (<= 8 bytes)
+    // When assigning large to small, it's likely a pointer-to-array assignment
+    
+    if (codegen->currentFunction != NULL && !isConstantValue(quad->arg1) && quad->arg1[0] != 't') {
+        ActivationRecord* record = codegen->currentFunction;
+        
+        // Find source and destination in activation record
+        int srcIdx = -1, destIdx = -1;
+        for (int i = 0; i < record->varCount; i++) {
+            if (strcmp(record->variables[i].varName, quad->arg1) == 0) {
+                srcIdx = i;
+            }
+            if (strcmp(record->variables[i].varName, quad->result) == 0) {
+                destIdx = i;
+            }
+        }
+        
+        // If source has size > 8 and destination has size <= 8, it's likely ptr = array
+        // We use > 8 to avoid treating pointers (size 4-8) as arrays
+        if (srcIdx >= 0 && destIdx >= 0) {
+            int srcSize = record->variables[srcIdx].size;
+            int destSize = record->variables[destIdx].size;
+            
+            if (srcSize > 8 && destSize <= 8 && srcSize > destSize) {
+                // This is pointer-to-array assignment - compute address
+                int offset = record->variables[srcIdx].offset;
+                int regDest = getReg(codegen, quad->result, irIndex);
+                
+                sprintf(instr, "    addi %s, $fp, %d    # %s = &%s (array address)", 
+                        getRegisterName(regDest), offset, quad->result, quad->arg1);
+                emitMIPS(codegen, instr);
+                
+                // Store to destination
+                storeVariable(codegen, quad->result, regDest);
+                
+                // Update descriptors
+                updateDescriptors(codegen, regDest, quad->result);
+                codegen->regDescriptors[regDest].isDirty = true;
+                return;
+            }
+        }
+    }
+    
+
     
     // FIX: Handle constant assignments directly (a = 10)
     if (isConstantValue(quad->arg1)) {
@@ -1266,12 +1409,18 @@ void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad) {
     
     if (labelName != NULL) {
         // CRITICAL FIX: Spill all registers before label to save any pending changes
-        // Then clear all register descriptors at label boundaries
+        // Then clear all register descriptors and invalidate address descriptors
         // This ensures variables are saved before control flow changes
         for (int r = REG_T0; r <= REG_T9; r++) {
             if (codegen->regDescriptors[r].varCount > 0) {
                 spillRegister(codegen, r);
             }
+        }
+        
+        // CRITICAL: Also invalidate ALL address descriptors after label
+        // Variables may be loaded from multiple paths, so we can't trust register contents
+        for (int i = 0; i < codegen->addrDescCount; i++) {
+            codegen->addrDescriptors[i].inRegister = -1;
         }
         
         sanitizeLabelName(labelName, sanitized);
@@ -1294,6 +1443,12 @@ void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad) {
         if (codegen->regDescriptors[r].varCount > 0) {
             spillRegister(codegen, r);
         }
+    }
+    
+    // CRITICAL: Also invalidate ALL address descriptors before goto
+    // The target label may be reached from multiple paths, so register contents can't be trusted
+    for (int i = 0; i < codegen->addrDescCount; i++) {
+        codegen->addrDescriptors[i].inRegister = -1;
     }
     
     // The label can be in result OR arg1 depending on IR format
@@ -1863,6 +2018,59 @@ void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
     const char* indexVar = quad->arg2;
     const char* resultVar = quad->result;
     
+    // Check if this is a pointer dereference (ptr[i]) or array access (arr[i])
+    Symbol* arraySym = lookupSymbol(arrayName);
+    bool isPointerAccess = (arraySym != NULL && arraySym->ptr_level > 0 && !arraySym->is_array);
+    
+    // Get actual element size from symbol table
+    bool isCharArray = false;
+    int elementSize = getArrayElementInfo(arrayName, &isCharArray);
+    
+    // Handle pointer subscripting: ptr[i] where ptr is a pointer variable
+    if (isPointerAccess) {
+        // Load pointer value from memory
+        int ptrReg = getReg(codegen, arrayName, irIndex);
+        
+        // Get index
+        int indexReg;
+        if (isConstantValue(indexVar)) {
+            indexReg = REG_T8;
+            sprintf(instr, "    li %s, %d", getRegisterName(indexReg), atoi(indexVar));
+            emitMIPS(codegen, instr);
+        } else {
+            indexReg = getReg(codegen, indexVar, irIndex);
+        }
+        
+        // Calculate offset = index * element_size
+        if (elementSize == 4) {
+            sprintf(instr, "    sll $t9, %s, 2", getRegisterName(indexReg));
+        } else if (elementSize == 1) {
+            sprintf(instr, "    move $t9, %s", getRegisterName(indexReg));
+        } else {
+            sprintf(instr, "    li $t9, %d", elementSize);
+            emitMIPS(codegen, instr);
+            sprintf(instr, "    mul $t9, %s, $t9", getRegisterName(indexReg));
+        }
+        emitMIPS(codegen, instr);
+        
+        // Add offset to pointer: address = ptr + (index * elementSize)
+        sprintf(instr, "    add $t8, %s, $t9", getRegisterName(ptrReg));
+        emitMIPS(codegen, instr);
+        
+        // Load value at address - use lb for char, lw for others
+        int resultReg = getReg(codegen, resultVar, irIndex);
+        if (isCharArray) {
+            sprintf(instr, "    lb %s, 0($t8)", getRegisterName(resultReg));
+        } else {
+            sprintf(instr, "    lw %s, 0($t8)", getRegisterName(resultReg));
+        }
+        emitMIPS(codegen, instr);
+        
+        updateDescriptors(codegen, resultReg, resultVar);
+        return;
+    }
+    
+    // Regular array access: arr[i] where arr is an array
     // Get base address of array (from $fp offset)
     char arrayLocation[128];
     getMemoryLocation(codegen, arrayName, arrayLocation);
@@ -1873,21 +2081,18 @@ void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         sscanf(arrayLocation, "%d($fp)", &baseOffset);
     }
     
-    // Calculate element offset
-    // element_size = 4 for int/float/pointers, 1 for char
-    int elementSize = 4; // Default to 4
-    
-    // TODO: Look up actual element size from symbol table
-    // For now, assume int arrays (4 bytes)
-    
     if (isConstantValue(indexVar)) {
         // Constant index - calculate offset at compile time
         int index = atoi(indexVar);
         int totalOffset = baseOffset + (index * elementSize);
         
-        // Load from calculated address
+        // Load from calculated address - use lb for char, lw for others
         int resultReg = getReg(codegen, resultVar, irIndex);
-        sprintf(instr, "    lw %s, %d($fp)", getRegisterName(resultReg), totalOffset);
+        if (isCharArray) {
+            sprintf(instr, "    lb %s, %d($fp)", getRegisterName(resultReg), totalOffset);
+        } else {
+            sprintf(instr, "    lw %s, %d($fp)", getRegisterName(resultReg), totalOffset);
+        }
         emitMIPS(codegen, instr);
         
         updateDescriptors(codegen, resultReg, resultVar);
@@ -1902,6 +2107,9 @@ void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         } else if (elementSize == 1) {
             // Multiply by 1: offset = index
             sprintf(instr, "    move $t8, %s", getRegisterName(indexReg));
+        } else if (elementSize == 8) {
+            // Multiply by 8: shift left by 3
+            sprintf(instr, "    sll $t8, %s, 3", getRegisterName(indexReg));
         } else {
             // General case: multiply
             sprintf(instr, "    li $t9, %d", elementSize);
@@ -1918,9 +2126,13 @@ void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         sprintf(instr, "    add $t8, $t8, $fp");
         emitMIPS(codegen, instr);
         
-        // Load value at address
+        // Load value at address - use lb for char, lw for others
         int resultReg = getReg(codegen, resultVar, irIndex);
-        sprintf(instr, "    lw %s, 0($t8)", getRegisterName(resultReg));
+        if (isCharArray) {
+            sprintf(instr, "    lb %s, 0($t8)", getRegisterName(resultReg));
+        } else {
+            sprintf(instr, "    lw %s, 0($t8)", getRegisterName(resultReg));
+        }
         emitMIPS(codegen, instr);
         
         updateDescriptors(codegen, resultReg, resultVar);
@@ -1939,6 +2151,65 @@ void translateAssignArray(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
     const char* arrayName = quad->arg2;
     const char* valueVar = quad->result;
     
+    // Check if this is a pointer dereference (ptr[i]) or array access (arr[i])
+    Symbol* arraySym = lookupSymbol(arrayName);
+    bool isPointerAccess = (arraySym != NULL && arraySym->ptr_level > 0 && !arraySym->is_array);
+    
+    // Get actual element size from symbol table
+    bool isCharArray = false;
+    int elementSize = getArrayElementInfo(arrayName, &isCharArray);
+    
+    // Handle pointer subscripting: ptr[i] where ptr is a pointer variable
+    if (isPointerAccess) {
+        // Load pointer value from memory
+        int ptrReg = getReg(codegen, arrayName, irIndex);
+        
+        // Get index
+        int indexReg;
+        if (isConstantValue(indexVar)) {
+            indexReg = REG_T8;
+            sprintf(instr, "    li %s, %d", getRegisterName(indexReg), atoi(indexVar));
+            emitMIPS(codegen, instr);
+        } else {
+            indexReg = getReg(codegen, indexVar, irIndex);
+        }
+        
+        // Calculate offset = index * element_size
+        if (elementSize == 4) {
+            sprintf(instr, "    sll $t9, %s, 2", getRegisterName(indexReg));
+        } else if (elementSize == 1) {
+            sprintf(instr, "    move $t9, %s", getRegisterName(indexReg));
+        } else {
+            sprintf(instr, "    li $t9, %d", elementSize);
+            emitMIPS(codegen, instr);
+            sprintf(instr, "    mul $t9, %s, $t9", getRegisterName(indexReg));
+        }
+        emitMIPS(codegen, instr);
+        
+        // Add offset to pointer: address = ptr + (index * elementSize)
+        sprintf(instr, "    add $t9, %s, $t9", getRegisterName(ptrReg));
+        emitMIPS(codegen, instr);
+        
+        // Get value to store
+        int valueReg;
+        if (isConstantValue(valueVar)) {
+            loadVariable(codegen, valueVar, REG_T8);
+            valueReg = REG_T8;
+        } else {
+            valueReg = getReg(codegen, valueVar, irIndex);
+        }
+        
+        // Store value at computed address - use sb for char, sw for others
+        if (isCharArray) {
+            sprintf(instr, "    sb %s, 0($t9)", getRegisterName(valueReg));
+        } else {
+            sprintf(instr, "    sw %s, 0($t9)", getRegisterName(valueReg));
+        }
+        emitMIPS(codegen, instr);
+        return;
+    }
+    
+    // Regular array access: arr[i] where arr is an array
     // Get base address of array (from $fp offset)
     char arrayLocation[128];
     getMemoryLocation(codegen, arrayName, arrayLocation);
@@ -1949,9 +2220,6 @@ void translateAssignArray(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         sscanf(arrayLocation, "%d($fp)", &baseOffset);
     }
     
-    // Element size
-    int elementSize = 4; // Default to 4 (TODO: look up from symbol table)
-    
     if (isConstantValue(indexVar)) {
         // Constant index - calculate offset at compile time
         int index = atoi(indexVar);
@@ -1961,12 +2229,22 @@ void translateAssignArray(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         if (isConstantValue(valueVar)) {
             // Constant value - use loadVariable which handles floats
             loadVariable(codegen, valueVar, REG_T9);
-            sprintf(instr, "    sw $t9, %d($fp)", totalOffset);
+            // Use sb for char arrays, sw for others
+            if (isCharArray) {
+                sprintf(instr, "    sb $t9, %d($fp)", totalOffset);
+            } else {
+                sprintf(instr, "    sw $t9, %d($fp)", totalOffset);
+            }
             emitMIPS(codegen, instr);
         } else {
             // Variable value
             int valueReg = getReg(codegen, valueVar, irIndex);
-            sprintf(instr, "    sw %s, %d($fp)", getRegisterName(valueReg), totalOffset);
+            // Use sb for char arrays, sw for others
+            if (isCharArray) {
+                sprintf(instr, "    sb %s, %d($fp)", getRegisterName(valueReg), totalOffset);
+            } else {
+                sprintf(instr, "    sw %s, %d($fp)", getRegisterName(valueReg), totalOffset);
+            }
             emitMIPS(codegen, instr);
         }
     } else {
@@ -1978,6 +2256,8 @@ void translateAssignArray(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
             sprintf(instr, "    sll $t8, %s, 2", getRegisterName(indexReg));
         } else if (elementSize == 1) {
             sprintf(instr, "    move $t8, %s", getRegisterName(indexReg));
+        } else if (elementSize == 8) {
+            sprintf(instr, "    sll $t8, %s, 3", getRegisterName(indexReg));
         } else {
             sprintf(instr, "    li $t9, %d", elementSize);
             emitMIPS(codegen, instr);
@@ -1998,11 +2278,21 @@ void translateAssignArray(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         if (isConstantValue(valueVar)) {
             // Use loadVariable which handles floats
             loadVariable(codegen, valueVar, REG_T9);
-            sprintf(instr, "    sw $t9, 0($t8)");
+            // Use sb for char arrays, sw for others
+            if (isCharArray) {
+                sprintf(instr, "    sb $t9, 0($t8)");
+            } else {
+                sprintf(instr, "    sw $t9, 0($t8)");
+            }
             emitMIPS(codegen, instr);
         } else {
             valueReg = getReg(codegen, valueVar, irIndex);
-            sprintf(instr, "    sw %s, 0($t8)", getRegisterName(valueReg));
+            // Use sb for char arrays, sw for others
+            if (isCharArray) {
+                sprintf(instr, "    sb %s, 0($t8)", getRegisterName(valueReg));
+            } else {
+                sprintf(instr, "    sw %s, 0($t8)", getRegisterName(valueReg));
+            }
             emitMIPS(codegen, instr);
         }
     }
@@ -2044,6 +2334,114 @@ void translateAddr(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
         emitMIPS(codegen, instr);
         
         updateDescriptors(codegen, resultReg, resultVar);
+    }
+}
+
+/**
+ * Translate ARRAY_ADDR operation: result = &array[index]
+ * Computes the address of an array element
+ * This is critical for pointer arithmetic like: ptr = arr + 3
+ */
+void translateArrayAddr(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
+    char instr[256];
+    
+    const char* arrayName = quad->arg1;
+    const char* indexVar = quad->arg2;
+    const char* resultVar = quad->result;
+    
+    // Check if this is a pointer dereference (ptr[i]) or array access (arr[i])
+    Symbol* arraySym = lookupSymbol(arrayName);
+    bool isPointerAccess = (arraySym != NULL && arraySym->ptr_level > 0 && !arraySym->is_array);
+    
+    // Get element size from symbol table
+    bool isCharArray = false;
+    int elementSize = getArrayElementInfo(arrayName, &isCharArray);
+    
+    if (isPointerAccess) {
+        // ptr[i] - load pointer value from memory, add index offset
+        int ptrReg = getReg(codegen, arrayName, irIndex);
+        
+        // Get index
+        int indexReg;
+        if (isConstantValue(indexVar)) {
+            indexReg = REG_T8;
+            sprintf(instr, "    li %s, %d", getRegisterName(indexReg), atoi(indexVar));
+            emitMIPS(codegen, instr);
+        } else {
+            indexReg = getReg(codegen, indexVar, irIndex);
+        }
+        
+        // Calculate offset = index * element_size
+        if (elementSize == 4) {
+            sprintf(instr, "    sll $t9, %s, 2", getRegisterName(indexReg));
+        } else if (elementSize == 1) {
+            sprintf(instr, "    move $t9, %s", getRegisterName(indexReg));
+        } else {
+            sprintf(instr, "    li $t9, %d", elementSize);
+            emitMIPS(codegen, instr);
+            sprintf(instr, "    mul $t9, %s, $t9", getRegisterName(indexReg));
+        }
+        emitMIPS(codegen, instr);
+        
+        // Add offset to pointer: address = ptr + (index * elementSize)
+        int resultReg = getReg(codegen, resultVar, irIndex);
+        sprintf(instr, "    add %s, %s, $t9", 
+                getRegisterName(resultReg), getRegisterName(ptrReg));
+        emitMIPS(codegen, instr);
+        
+        updateDescriptors(codegen, resultReg, resultVar);
+        codegen->regDescriptors[resultReg].isDirty = true;
+    } else {
+        // arr[i] - compute address from $fp offset
+        char arrayLocation[128];
+        getMemoryLocation(codegen, arrayName, arrayLocation);
+        
+        int baseOffset = 0;
+        if (strstr(arrayLocation, "($fp)") != NULL) {
+            sscanf(arrayLocation, "%d($fp)", &baseOffset);
+        }
+        
+        // Handle constant index vs variable index
+        if (isConstantValue(indexVar)) {
+            // Constant index - can compute address at compile time
+            int constIndex = atoi(indexVar);
+            int totalOffset = baseOffset + (constIndex * elementSize);
+            
+            int resultReg = getReg(codegen, resultVar, irIndex);
+            sprintf(instr, "    addi %s, $fp, %d", 
+                    getRegisterName(resultReg), totalOffset);
+            emitMIPS(codegen, instr);
+            
+            updateDescriptors(codegen, resultReg, resultVar);
+            codegen->regDescriptors[resultReg].isDirty = true;
+        } else {
+            // Variable index - must compute at runtime
+            int indexReg = getReg(codegen, indexVar, irIndex);
+            
+            // Calculate offset = index * element_size
+            if (elementSize == 4) {
+                sprintf(instr, "    sll $t9, %s, 2", getRegisterName(indexReg));
+            } else if (elementSize == 1) {
+                sprintf(instr, "    move $t9, %s", getRegisterName(indexReg));
+            } else {
+                sprintf(instr, "    li $t9, %d", elementSize);
+                emitMIPS(codegen, instr);
+                sprintf(instr, "    mul $t9, %s, $t9", getRegisterName(indexReg));
+            }
+            emitMIPS(codegen, instr);
+            
+            // Add base offset to scaled index
+            sprintf(instr, "    addi $t9, $t9, %d", baseOffset);
+            emitMIPS(codegen, instr);
+            
+            // Add to $fp to get final address
+            int resultReg = getReg(codegen, resultVar, irIndex);
+            sprintf(instr, "    add %s, $fp, $t9", getRegisterName(resultReg));
+            emitMIPS(codegen, instr);
+            
+            updateDescriptors(codegen, resultReg, resultVar);
+            codegen->regDescriptors[resultReg].isDirty = true;
+        }
     }
 }
 
@@ -2329,6 +2727,10 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
     // ADDR - address-of operator (Phase 3)
     else if (strcmp(quad->op, "ADDR") == 0 || strcmp(quad->op, "&") == 0) {
         translateAddr(codegen, quad, irIndex);
+    }
+    // ARRAY_ADDR - address of array element: &arr[i]
+    else if (strcmp(quad->op, "ARRAY_ADDR") == 0) {
+        translateArrayAddr(codegen, quad, irIndex);
     }
     // DEREF - dereference operator (Phase 3)
     else if (strcmp(quad->op, "DEREF") == 0 || strcmp(quad->op, "*") == 0) {
