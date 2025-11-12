@@ -329,15 +329,28 @@ void assignVariableOffsets(ActivationRecord* record, const char* funcName,
             
             if (!isParam && record->varCount < MAX_VARIABLES) {
                 strcpy(record->variables[record->varCount].varName, symtab[i].name);
-                record->variables[record->varCount].offset = offset;
                 
                 // Calculate aligned size (CRITICAL FIX: ensure 4-byte alignment)
                 int varSize = symtab[i].size > 0 ? symtab[i].size : 4;
                 int alignedSize = ((varSize + 3) / 4) * 4;  // Round up to multiple of 4
                 
+                // CRITICAL FIX: For arrays, offset should point to the BEGINNING of the array
+                // such that all elements are at negative offsets from $fp.
+                // Arrays grow upward in memory (arr[0] at offset, arr[1] at offset+4, etc.)
+                // So we place the array START at (offset - arraySize) to ensure all elements
+                // stay below $fp and don't overwrite saved $ra/$fp
+                if (varSize > 4) {
+                    // This is likely an array - place it so all elements fit below current offset
+                    offset -= alignedSize;
+                    record->variables[record->varCount].offset = offset;
+                } else {
+                    // Regular variable - just use current offset
+                    record->variables[record->varCount].offset = offset;
+                    offset -= alignedSize;
+                }
+                
                 record->variables[record->varCount].size = varSize;  // Store actual size
                 record->varCount++;
-                offset -= alignedSize;  // Use aligned size for offset calculation
             }
         }
     }
