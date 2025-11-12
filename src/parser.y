@@ -751,9 +751,6 @@ program:
         $$ = createNode(NODE_PROGRAM, "program");
         addChild($$, $1);
         ast_root = $$; // Set the global AST root
-        if (error_count == 0) {
-            printf("\n=== PARSING COMPLETED SUCCESSFULLY ===\n");
-        }
     }
     ;
 
