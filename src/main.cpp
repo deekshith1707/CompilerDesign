@@ -49,18 +49,11 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    cout << "============================================" << endl;
-    cout << "  C Like Compiler - IR GENERATOR/SEMANTIC ANALYZER" << endl;
-    cout << "============================================" << endl;
-    cout << "Input file: " << argv[1] << endl;
-    cout << "============================================" << endl;
-    cout << endl;
+    cout << "[" << argv[1] << "]" << endl;
 
     if (yyparse() == 0 && error_count == 0) {
-        cout << "\n=== PARSING SUCCESSFUL ===" << endl;
         printSymbolTable();
         if (ast_root) {
-            cout << "\n=== GENERATING IR CODE ===" << endl;
             generate_ir(ast_root);
 
             string inputFile(argv[1]);
@@ -73,7 +66,6 @@ int main(int argc, char **argv) {
             }
             
             printIR(outputFile.c_str());
-            cout << "\n=== CODE GENERATION COMPLETED ===" << endl;
             
             // Perform basic block analysis if requested
             if (analyzeBlocks) {
@@ -93,10 +85,7 @@ int main(int argc, char **argv) {
             
             // Generate MIPS assembly code if requested
             if (generateMIPS) {
-                cout << "About to call testMIPSCodeGeneration()" << endl;
-                cout.flush();
                 testMIPSCodeGeneration();
-                cout << "Returned from testMIPSCodeGeneration()" << endl;
             }
         } else {
             cout << "\n=== PARSING SUCCEEDED BUT NO AST WAS GENERATED ===" << endl;
