@@ -1,0 +1,36 @@
+# Compiled executables
+ir_generator
+
+# Object files
+*.o
+obj/*.o
+
+# Generated parser/lexer files
+obj/lex.yy.c
+obj/parser.tab.c
+obj/parser.tab.h
+obj/parser.output
+
+# Generated intermediate representation
+*.ir
+test/*.ir
+
+# Generated assembly files
+*.s
+output.s
+test/*.s
+
+# Output files
+*.output
+test/*.output
+
+# Temporary files
+*.tmp
+*~
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo

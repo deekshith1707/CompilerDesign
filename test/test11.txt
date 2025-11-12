@@ -1,8 +1,0 @@
-//Keyword as identifier
-#include <stdio.h>
-
-int main() {
-    int static = 10;
-    printf("Value: %d\n", static);
-    return 0;
-}
