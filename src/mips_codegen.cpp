@@ -334,19 +334,23 @@ void assignVariableOffsets(ActivationRecord* record, const char* funcName,
                 int varSize = symtab[i].size > 0 ? symtab[i].size : 4;
                 int alignedSize = ((varSize + 3) / 4) * 4;  // Round up to multiple of 4
                 
-                // CRITICAL FIX: For arrays, offset should point to the BEGINNING of the array
+                //  CRITICAL FIX: For arrays, offset should point to the BEGINNING of the array
                 // such that all elements are at negative offsets from $fp.
                 // Arrays grow upward in memory (arr[0] at offset, arr[1] at offset+4, etc.)
-                // So we place the array START at (offset - arraySize) to ensure all elements
-                // stay below $fp and don't overwrite saved $ra/$fp
                 if (varSize > 4) {
                     // This is likely an array - place it so all elements fit below current offset
                     offset -= alignedSize;
                     record->variables[record->varCount].offset = offset;
+
+                    // CRITICAL FIX: Move offset down by 4 more bytes to ensure next variable
+                    // doesn't overlap with the array base
+                    offset -= 4;
+
                 } else {
-                    // Regular variable - just use current offset
+                    // Regular variable - use old logic (assign then decrement) for compatibility
                     record->variables[record->varCount].offset = offset;
                     offset -= alignedSize;
+
                 }
                 
                 record->variables[record->varCount].size = varSize;  // Store actual size
@@ -789,14 +793,33 @@ const char* getRegisterName(int regNum) {
 }
 
 /**
- * Check if variable is global
+ * Check if variable is global or static (should be in .data section)
  */
 bool isGlobalVariable(MIPSCodeGenerator* codegen, const char* varName) {
+    // Check symbol table for global variables
     for (int i = 0; i < symCount; i++) {
         if (strcmp(symtab[i].name, varName) == 0) {
-            return (symtab[i].scope_level == 0 && !symtab[i].is_function);
+            if (symtab[i].scope_level == 0 && !symtab[i].is_function) {
+                return true;
+            }
         }
     }
+    
+    // Check staticVars array for static local variables (e.g., "func.var")
+    extern StaticVarInfo staticVars[];
+    extern int staticVarCount;
+    for (int i = 0; i < staticVarCount; i++) {
+        if (strcmp(staticVars[i].name, varName) == 0) {
+            return true;
+        }
+    }
+    
+    // Also check if variable name contains '.' which indicates static local variable
+    // (e.g., "static_function.local_static", "main.main_static")
+    if (strchr(varName, '.') != NULL) {
+        return true;
+    }
+    
     return false;
 }
 
@@ -2992,24 +3015,47 @@ void generateSyscall(MIPSCodeGenerator* codegen, int syscall_num, int reg) {
  * Generate .data section (static allocation - Lecture 32)
  */
 void generateDataSection(MIPSCodeGenerator* codegen) {
+    extern StaticVarInfo staticVars[];
+    extern int staticVarCount;
+    
     emitMIPS(codegen, ".data");
     emitMIPS(codegen, "");
     
-    // 1. Global/static variables from symbol table
+    // Create a combined list of all variables that need to be in .data section
+    // We'll use staticVars as the source of truth for initial values
+    
+    // First, emit all variables from staticVars array (these have correct init values)
+    for (int i = 0; i < staticVarCount; i++) {
+        char directive[256];
+        sprintf(directive, "%s: .word %s", staticVars[i].name, staticVars[i].init_value);
+        emitMIPS(codegen, directive);
+    }
+    
+    // Second, check for global variables in symbol table that might not be in staticVars
+    // (e.g., uninitialized globals or arrays)
     for (int i = 0; i < symCount; i++) {
         if (symtab[i].scope_level == 0 && !symtab[i].is_function) {
-            char directive[256];
-            
-            if (symtab[i].is_array) {
-                // Array allocation
-                int totalSize = symtab[i].size;
-                sprintf(directive, "%s: .space %d    # Array", symtab[i].name, totalSize);
-            } else {
-                // Simple variable
-                sprintf(directive, "%s: .word 0", symtab[i].name);
+            // Check if already added from staticVars
+            bool alreadyAdded = false;
+            for (int j = 0; j < staticVarCount; j++) {
+                if (strcmp(staticVars[j].name, symtab[i].name) == 0) {
+                    alreadyAdded = true;
+                    break;
+                }
             }
             
-            emitMIPS(codegen, directive);
+            if (!alreadyAdded) {
+                char directive[256];
+                if (symtab[i].is_array) {
+                    // Array allocation
+                    int totalSize = symtab[i].size;
+                    sprintf(directive, "%s: .space %d    # Array", symtab[i].name, totalSize);
+                } else {
+                    // Simple variable with no initializer
+                    sprintf(directive, "%s: .word 0", symtab[i].name);
+                }
+                emitMIPS(codegen, directive);
+            }
         }
     }
     

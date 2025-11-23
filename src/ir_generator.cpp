@@ -2253,7 +2253,20 @@ char* generate_ir(TreeNode* node) {
                     lhs_name = declarator->value; // fallback
                 }
                 
-                if (isStaticVariable(lhs_name)) {
+                // Check if this is a static variable or global variable (need to register in DATA section)
+                bool isStatic = isStaticVariable(lhs_name);
+                bool isGlobal = false;
+                
+                if (!isStatic) {
+                    // Check if it's a global variable (scope_level == 0)
+                    extern Symbol* lookupSymbol(const char* name);
+                    Symbol* sym = lookupSymbol(lhs_name);
+                    if (sym && sym->scope_level == 0 && !sym->is_function) {
+                        isGlobal = true;
+                    }
+                }
+                
+                if (isStatic || isGlobal) {
                     TreeNode* rhs = node->children[1];
                     
                     char* init_value = NULL;
@@ -2263,11 +2276,17 @@ char* generate_ir(TreeNode* node) {
                         init_value = generate_ir(rhs);
                     }
                     
-                    char* static_var_name = getStaticVarName(lhs_name);
+                    // For static variables, use the scoped name; for globals, use the plain name
+                    char* var_name_for_data;
+                    if (isStatic) {
+                        var_name_for_data = getStaticVarName(lhs_name);
+                    } else {
+                        var_name_for_data = strdup(lhs_name);
+                    }
                     
-                    registerStaticVar(static_var_name, init_value ? init_value : "0");
+                    registerStaticVar(var_name_for_data, init_value ? init_value : "0");
                     
-                    free(static_var_name);
+                    free(var_name_for_data);
                     
                     for (int i = 2; i < node->childCount; i++) {
                         generate_ir(node->children[i]);
