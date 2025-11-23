@@ -64,10 +64,23 @@ bool isConstantValue(const char* str) {
         return true;
     }
     
-    // Check for float constants (contains '.')
-    for (int i = 0; str[i] != '\0'; i++) {
-        if (str[i] == '.' && (i > 0 || isdigit(str[i+1]))) {
-            return true;
+    // Check for float constants (contains '.' AND is numeric)
+    // CRITICAL FIX: Must verify string is numeric to avoid matching variable names like "static_function.local_static"
+    if (strchr(str, '.') != NULL) {
+        // Contains '.', check if it's a numeric float constant
+        if (str[0] == '-' || str[0] == '+' || isdigit(str[0])) {
+            // Starts with digit or sign, check if all chars are numeric/dot/scientific notation
+            bool isNumeric = true;
+            for (int i = 0; str[i] != '\0'; i++) {
+                if (!isdigit(str[i]) && str[i] != '.' && str[i] != '-' && str[i] != '+' && 
+                    str[i] != 'e' && str[i] != 'E') {
+                    isNumeric = false;
+                    break;
+                }
+            }
+            if (isNumeric) {
+                return true;
+            }
         }
     }
     
@@ -75,21 +88,30 @@ bool isConstantValue(const char* str) {
 }
 
 /**
- * Check if a constant is a float (contains a decimal point)
+ * Check if a constant is a float (contains a decimal point and is numeric)
  */
 bool isFloatConstant(const char* str) {
     if (str == NULL || strlen(str) == 0) {
         return false;
     }
     
-    // Check for decimal point
+    // Must start with digit or minus sign for negative numbers
+    if (!isdigit(str[0]) && str[0] != '-' && str[0] != '+') {
+        return false;
+    }
+    
+    // Check for decimal point and ensure it's a numeric constant
+    bool hasDot = false;
     for (int i = 0; str[i] != '\0'; i++) {
         if (str[i] == '.') {
-            return true;
+            hasDot = true;
+        } else if (!isdigit(str[i]) && str[i] != '-' && str[i] != '+' && str[i] != 'e' && str[i] != 'E') {
+            // Contains non-numeric character (not part of float notation)
+            return false;
         }
     }
     
-    return false;
+    return hasDot;
 }
 
 /**
@@ -300,9 +322,12 @@ void assignVariableOffsets(ActivationRecord* record, const char* funcName,
     getParameterNames(funcName, params, &paramCount);
     record->numParams = paramCount;
     
-    // First 4 parameters go in $a0-$a3 (no stack space needed for them)
-    // Parameters 5+ need stack space
-    for (int p = 4; p < paramCount; p++) {
+    // CRITICAL FIX: Allocate stack space for ALL parameters, including first 4
+    // Even though first 4 come in $a0-$a3, they need stack slots for:
+    // 1. Saving across function calls (especially recursive calls)
+    // 2. Taking addresses of parameters (&param)
+    // 3. Preserving values when $a0-$a3 get reused for nested calls
+    for (int p = 0; p < paramCount; p++) {
         if (record->varCount < MAX_VARIABLES) {
             strcpy(record->variables[record->varCount].varName, params[p]);
             record->variables[record->varCount].offset = offset;
@@ -358,7 +383,8 @@ void assignVariableOffsets(ActivationRecord* record, const char* funcName,
             }
         }
     }
-    record->numLocals = record->varCount - (paramCount > 4 ? paramCount - 4 : 0);
+    // numLocals is varCount minus all parameters (since all params are now in activation record)
+    record->numLocals = record->varCount - paramCount;
     
     // 3. Assign offsets to temporary variables
     char temps[MAX_VARIABLES][128];
@@ -1060,18 +1086,36 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
         if (codegen->regDescriptors[r].varCount == 0) {
             // Empty register found!
             // Load from memory if:
-            // 1. Variable has inMemory flag set (was previously stored), OR
-            // 2. Variable exists in activation record AND has been defined (has address descriptor)
-            //    This prevents loading uninitialized temporaries
+            // 1. Variable has inMemory flag set (was previously stored), OR  
+            // 2. Variable is a global/static variable (in .data section), OR
+            // 3. Variable is a parameter (saved to stack in prologue), OR
+            // 4. Variable has address descriptor AND exists in activation record
             bool shouldLoad = false;
+            
             if (addrIdx >= 0 && codegen->addrDescriptors[addrIdx].inMemory) {
                 shouldLoad = true;
-            } else if (addrIdx >= 0 && codegen->currentFunction != NULL) {
-                // Only load if variable has been defined (has descriptor) AND exists in activation record
-                for (int i = 0; i < codegen->currentFunction->varCount; i++) {
-                    if (strcmp(codegen->currentFunction->variables[i].varName, varName) == 0) {
+            } else if (isGlobalVariable(codegen, varName)) {
+                shouldLoad = true;
+            } else if (codegen->currentFunction != NULL) {
+                // Check if this is a parameter - parameters are saved in prologue
+                char params[16][128];
+                int paramCount = 0;
+                getParameterNames(codegen->currentFunction->funcName, params, &paramCount);
+                
+                for (int p = 0; p < paramCount; p++) {
+                    if (strcmp(params[p], varName) == 0) {
                         shouldLoad = true;
                         break;
+                    }
+                }
+                
+                // If not a parameter, only load if it has address descriptor
+                if (!shouldLoad && addrIdx >= 0) {
+                    for (int i = 0; i < codegen->currentFunction->varCount; i++) {
+                        if (strcmp(codegen->currentFunction->variables[i].varName, varName) == 0) {
+                            shouldLoad = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -1513,6 +1557,12 @@ void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
                getRegisterName(regDest), 
                getRegisterName(regSrc));
         emitMIPS(codegen, instr);
+    }
+    
+    // CRITICAL FIX: If result is a global/static variable, store to memory immediately
+    // This ensures the value persists across function calls
+    if (isGlobalVariable(codegen, quad->result)) {
+        storeVariable(codegen, quad->result, regDest);
     }
     
     // Update descriptors
@@ -2309,21 +2359,54 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
         }
         
         // If call has a result, move return value from $v0 to destination
+        int resultReg = -1;  // Track which register holds the return value
         if (strlen(quad->result) > 0 && strcmp(quad->result, "") != 0) {
-            int destReg = getReg(codegen, quad->result, irIndex);
-            sprintf(instr, "    move %s, $v0", getRegisterName(destReg));
+            resultReg = getReg(codegen, quad->result, irIndex);
+            sprintf(instr, "    move %s, $v0", getRegisterName(resultReg));
             emitMIPS(codegen, instr);
             
             // Update descriptors
-            updateDescriptors(codegen, destReg, quad->result);
+            updateDescriptors(codegen, resultReg, quad->result);
         }
     }
     
     // CRITICAL FIX: Function calls clobber caller-saved registers ($t0-$t9, $a0-$a3)
     // Invalidate all register descriptors for caller-saved registers so subsequent
     // operations will reload variables from memory instead of trusting stale register values
+    // EXCEPTIONS:
+    // 1. Don't clear the register that holds the return value
+    // 2. Don't clear registers holding temporaries (tN) - they only exist in registers!
+    int resultReg = -1;
+    if (strlen(quad->result) > 0 && strcmp(quad->result, "") != 0) {
+        // Find which register holds the result (check address descriptor)
+        for (int i = 0; i < codegen->addrDescCount; i++) {
+            if (strcmp(codegen->addrDescriptors[i].varName, quad->result) == 0) {
+                resultReg = codegen->addrDescriptors[i].inRegister;
+                break;
+            }
+        }
+    }
+    
     for (int r = REG_T0; r <= REG_T9; r++) {
-        if (r <= REG_A3 || r >= REG_T0) {  // $a0-$a3 and $t0-$t9
+        if (r == resultReg) {
+            // Don't clear - holds the return value
+            continue;
+        }
+        
+        // Check if this register holds a temporary variable (tN)
+        // Temporaries only exist in registers, so we must preserve them
+        bool holdsTemporary = false;
+        if (codegen->regDescriptors[r].varCount > 0) {
+            for (int v = 0; v < codegen->regDescriptors[r].varCount; v++) {
+                const char* varName = codegen->regDescriptors[r].varNames[v];
+                if (varName[0] == 't' && isdigit(varName[1])) {
+                    holdsTemporary = true;
+                    break;
+                }
+            }
+        }
+        
+        if (!holdsTemporary) {
             clearRegisterDescriptor(codegen, r);
         }
     }
@@ -3151,6 +3234,24 @@ void generatePrologue(MIPSCodeGenerator* codegen, const char* funcName) {
     // Set new $fp
     sprintf(instr, "    addiu $fp, $sp, %d", record->frameSize - 4);
     emitMIPS(codegen, instr);
+    
+    // CRITICAL FIX: Save parameters from $a0-$a3 to their stack locations
+    // This ensures parameters can be restored after function calls (especially recursive)
+    char params[16][128];
+    int paramCount = 0;
+    getParameterNames(funcName, params, &paramCount);
+    
+    for (int p = 0; p < paramCount && p < 4; p++) {
+        // Find parameter's stack offset
+        for (int v = 0; v < record->varCount; v++) {
+            if (strcmp(record->variables[v].varName, params[p]) == 0) {
+                sprintf(instr, "    sw $a%d, %d($fp)    # Save parameter %s", 
+                       p, record->variables[v].offset, params[p]);
+                emitMIPS(codegen, instr);
+                break;
+            }
+        }
+    }
     
     emitMIPS(codegen, "");
 }
