@@ -39,7 +39,7 @@ int main() {
     
     // Type checking scenarios
     printf("arr1[0] = %d\n", arr1[0]);
-    printf("str2 = %s\n", str2);
+    printf("str2 = %s\n", str2);    
     
     /*
     // Type errors

@@ -49,10 +49,10 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    cout << "[" << argv[1] << "]" << endl;
+    // cout << "[" << argv[1] << "]" << endl;
 
     if (yyparse() == 0 && error_count == 0) {
-        printSymbolTable();
+        // printSymbolTable();  // Commented for clean MIPS output
         if (ast_root) {
             generate_ir(ast_root);
 

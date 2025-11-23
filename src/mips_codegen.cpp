@@ -589,7 +589,7 @@ void initMIPSCodeGen(MIPSCodeGenerator* codegen) {
         codegen->stringLiterals[i][0] = '\0';
     }
     
-    printf("MIPS Code Generator initialized.\n");
+    // printf("MIPS Code Generator initialized.\n");  // Commented for clean output
 }
 
 /**
@@ -701,10 +701,21 @@ void updateDescriptors(MIPSCodeGenerator* codegen, int regNum, const char* varNa
 
 /**
  * Clear register descriptor
+ * CRITICAL FIX: Also invalidate all address descriptors pointing to this register
+ * This ensures consistency - if register is cleared, no variable should think it's still there
  */
 void clearRegisterDescriptor(MIPSCodeGenerator* codegen, int regNum) {
     codegen->regDescriptors[regNum].varCount = 0;
     codegen->regDescriptors[regNum].isDirty = false;
+    
+    // CRITICAL FIX: Invalidate all address descriptors pointing to this register
+    // This prevents stale "inRegister" references after register is cleared
+    for (int i = 0; i < codegen->addrDescCount; i++) {
+        if (codegen->addrDescriptors[i].inRegister == regNum) {
+            codegen->addrDescriptors[i].inRegister = -1;
+        }
+    }
+    
     for (int i = 0; i < 10; i++) {
         codegen->regDescriptors[regNum].varNames[i][0] = '\0';
     }
@@ -1024,8 +1035,24 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
     for (int r = REG_T0; r <= REG_T9; r++) {
         if (codegen->regDescriptors[r].varCount == 0) {
             // Empty register found!
-            // FIX: Only load from memory if variable has been initialized (inMemory == true)
+            // Load from memory if:
+            // 1. Variable has inMemory flag set (was previously stored), OR
+            // 2. Variable exists in activation record AND has been defined (has address descriptor)
+            //    This prevents loading uninitialized temporaries
+            bool shouldLoad = false;
             if (addrIdx >= 0 && codegen->addrDescriptors[addrIdx].inMemory) {
+                shouldLoad = true;
+            } else if (addrIdx >= 0 && codegen->currentFunction != NULL) {
+                // Only load if variable has been defined (has descriptor) AND exists in activation record
+                for (int i = 0; i < codegen->currentFunction->varCount; i++) {
+                    if (strcmp(codegen->currentFunction->variables[i].varName, varName) == 0) {
+                        shouldLoad = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (shouldLoad) {
                 loadVariable(codegen, varName, r);
             }
             updateDescriptors(codegen, r, varName);
@@ -1309,6 +1336,47 @@ void translateArithmetic(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
  */
 void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     char instr[256];
+    
+    // CHECK: If arg1 starts with '&', this is an address-of operation
+    // Example: t20 = &input_int
+    // CRITICAL: We compute the ADDRESS and store it in the RESULT temporary
+    // We do NOT update the address descriptor for the variable being addressed
+    if (quad->arg1[0] == '&') {
+        const char* varName = quad->arg1 + 1;  // Skip the '&'
+        const char* resultVar = quad->result;
+        
+        // Get variable's memory location
+        char location[128];
+        getMemoryLocation(codegen, varName, location);
+        
+        // Parse offset value (e.g., "-12" from "-12($fp)")
+        int offset = 0;
+        if (strstr(location, "($fp)") != NULL) {
+            sscanf(location, "%d($fp)", &offset);
+            
+            // Calculate address (add offset to $fp)
+            int resultReg = getReg(codegen, resultVar, irIndex);
+            sprintf(instr, "    addi %s, $fp, %d    # %s = &%s (address calculation)", 
+                    getRegisterName(resultReg), offset, resultVar, varName);
+            emitMIPS(codegen, instr);
+            
+            // CRITICAL FIX: Only update descriptor for RESULT, not for varName
+            // The result temp holds an ADDRESS, not the variable's VALUE
+            updateDescriptors(codegen, resultReg, resultVar);
+            codegen->regDescriptors[resultReg].isDirty = true;
+        } else {
+            // Global variable - load address
+            int resultReg = getReg(codegen, resultVar, irIndex);
+            sprintf(instr, "    la %s, %s    # %s = &%s (global address)", 
+                    getRegisterName(resultReg), varName, resultVar, varName);
+            emitMIPS(codegen, instr);
+            
+            // CRITICAL FIX: Only update descriptor for RESULT, not for varName
+            updateDescriptors(codegen, resultReg, resultVar);
+            codegen->regDescriptors[resultReg].isDirty = true;
+        }
+        return;
+    }
     
     // CRITICAL FIX: Detect pointer-to-array assignment using activation record info
     // In C, when you assign an array name to a pointer (ptr = array), you're assigning the ADDRESS
@@ -1941,15 +2009,134 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
         // No return value needed for printf
     }
     else if (strcmp(funcName, "scanf") == 0) {
-        // Handle scanf with syscall 5 (read_int)
-        sprintf(instr, "    li $v0, 5    # syscall 5: read_int");
-        emitMIPS(codegen, instr);
-        emitMIPS(codegen, "    syscall");
+        // FULL SCANF IMPLEMENTATION WITH FORMAT STRING PARSING
+        // Get parameter count from quad->arg2 or currentParamCount
+        int numParams = paramCount;
+        if (quad->arg2 != NULL && strlen(quad->arg2) > 0 && isdigit(quad->arg2[0])) {
+            numParams = atoi(quad->arg2);
+        }
         
-        // Result is in $v0, store to the address in $a0
-        // Note: scanf needs address, so PARAM should have passed &variable
-        sprintf(instr, "    sw $v0, 0($a0)");
-        emitMIPS(codegen, instr);
+        // Get the format string - it's the FIRST parameter (last one pushed before call)
+        // Search back exactly numParams PARAM instructions
+        char formatStr[512] = "";
+        bool foundFormat = false;
+        int paramsFound = 0;
+        
+        for (int i = irIndex - 1; i >= 0 && i >= irIndex - 30 && paramsFound < numParams; i--) {
+            if (strcmp(codegen->IR[i].op, "PARAM") == 0 || strcmp(codegen->IR[i].op, "param") == 0) {
+                paramsFound++;
+                if (paramsFound == numParams && codegen->IR[i].arg1[0] == '"') {
+                    // This is the first param (format string)
+                    strncpy(formatStr, codegen->IR[i].arg1, sizeof(formatStr) - 1);
+                    foundFormat = true;
+                    break;
+                }
+            }
+        }
+        
+        if (!foundFormat || formatStr[0] != '"') {
+            // Fallback to simple int scanf
+            sprintf(instr, "    li $v0, 5    # syscall 5: read_int");
+            emitMIPS(codegen, instr);
+            emitMIPS(codegen, "    syscall");
+            sprintf(instr, "    sw $v0, 0($a1)");
+            emitMIPS(codegen, instr);
+        } else {
+            // Parse format string and generate appropriate reads
+            // Parameters: first is format string, rest are addresses
+            int argIndex = 1;  // Start with first address argument
+            
+            // Parse format string for specifiers
+            for (int i = 1; formatStr[i] != '\0' && formatStr[i] != '"'; i++) {
+                if (formatStr[i] == '%' && formatStr[i+1] != '%' && formatStr[i+1] != '\0' && formatStr[i+1] != '"') {
+                    i++;  // Move past '%'
+                    char spec = formatStr[i];
+                    
+                    // Skip spaces and width specifiers
+                    while (spec == ' ') {
+                        i++;
+                        spec = formatStr[i];
+                    }
+                    while (spec >= '0' && spec <= '9') {
+                        i++;
+                        spec = formatStr[i];
+                    }
+                    
+                    // Load the address of variable from argument
+                    // Arguments are in $a1, $a2, $a3, or stack
+                    if (argIndex == 1) {
+                        sprintf(instr, "    move $t8, $a1    # Load address arg %d", argIndex);
+                    } else if (argIndex == 2) {
+                        sprintf(instr, "    move $t8, $a2    # Load address arg %d", argIndex);
+                    } else if (argIndex == 3) {
+                        sprintf(instr, "    move $t8, $a3    # Load address arg %d", argIndex);
+                    } else {
+                        // Load from stack (params beyond $a0-$a3)
+                        // Stack has params in reverse order, adjust offset
+                        int stackOffset = (paramCount - 1 - argIndex) * 4;
+                        sprintf(instr, "    lw $t8, %d($sp)    # Load address arg %d", stackOffset, argIndex);
+                    }
+                    emitMIPS(codegen, instr);
+                    
+                    // Generate appropriate read syscall
+                    if (spec == 'd' || spec == 'i') {
+                        // Read integer
+                        sprintf(instr, "    li $v0, 5    # syscall 5: read_int");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
+                        sprintf(instr, "    sw $v0, 0($t8)   # Store int to address");
+                        emitMIPS(codegen, instr);
+                    } else if (spec == 'f') {
+                        // Read float (SPIM syscall 6)
+                        sprintf(instr, "    li $v0, 6    # syscall 6: read_float");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
+                        sprintf(instr, "    swc1 $f0, 0($t8) # Store float to address");
+                        emitMIPS(codegen, instr);
+                    } else if (spec == 'c') {
+                        // Read character (syscall 12)
+                        sprintf(instr, "    li $v0, 12   # syscall 12: read_char");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
+                        sprintf(instr, "    sb $v0, 0($t8)   # Store char to address");
+                        emitMIPS(codegen, instr);
+                    } else if (spec == 's') {
+                        // Read string (syscall 8)
+                        sprintf(instr, "    move $a0, $t8    # Buffer address");
+                        emitMIPS(codegen, instr);
+                        sprintf(instr, "    li $a1, 100      # Max length");
+                        emitMIPS(codegen, instr);
+                        sprintf(instr, "    li $v0, 8    # syscall 8: read_string");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
+                    } else {
+                        // Default to int
+                        sprintf(instr, "    li $v0, 5    # syscall 5: read_int (default)");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
+                        sprintf(instr, "    sw $v0, 0($t8)   # Store to address");
+                        emitMIPS(codegen, instr);
+                    }
+                    
+                    argIndex++;
+                }
+            }
+            
+            // scanf returns number of items successfully read
+            sprintf(instr, "    li $v0, %d    # Return number of items read", argIndex - 1);
+            emitMIPS(codegen, instr);
+        }
+        
+        // CRITICAL: scanf writes to memory through pointers, so we must invalidate
+        // ALL descriptors to force subsequent loads to read fresh values from memory
+        // Clear all registers and invalidate address descriptor register pointers
+        for (int r = REG_T0; r <= REG_T9; r++) {
+            clearRegisterDescriptor(codegen, r);
+        }
+        // Ensure all address descriptors show variables are NOT in registers
+        for (int i = 0; i < codegen->addrDescCount; i++) {
+            codegen->addrDescriptors[i].inRegister = -1;
+        }
     }
     else {
         // Regular function call - generate jal
