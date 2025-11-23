@@ -1750,6 +1750,84 @@ void translateLogical(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) 
     codegen->regDescriptors[getReg(codegen, quad->result, irIndex)].isDirty = true;
 }
 
+/**
+ * Translate bitwise operation (BITAND, BITOR, BITXOR, BITNOT, LSHIFT, RSHIFT)
+ */
+void translateBitwise(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
+    char instr[256];
+    
+    if (strcmp(quad->op, "BITNOT") == 0 || strcmp(quad->op, "~") == 0) {
+        // Unary BITNOT: ~a = NOR a, $zero
+        int regArg1 = getReg(codegen, quad->arg1, irIndex);
+        int regResult = getReg(codegen, quad->result, irIndex);
+        
+        sprintf(instr, "    nor %s, %s, $zero", 
+               getRegisterName(regResult),
+               getRegisterName(regArg1));
+        emitMIPS(codegen, instr);
+        
+        updateDescriptors(codegen, regResult, quad->result);
+    } else {
+        // Binary bitwise operations
+        int regArg1 = getReg(codegen, quad->arg1, irIndex);
+        int regArg2 = getReg(codegen, quad->arg2, irIndex);
+        int regResult = getReg(codegen, quad->result, irIndex);
+        
+        if (strcmp(quad->op, "BITAND") == 0 || strcmp(quad->op, "&") == 0) {
+            sprintf(instr, "    and %s, %s, %s", 
+                   getRegisterName(regResult),
+                   getRegisterName(regArg1),
+                   getRegisterName(regArg2));
+        } else if (strcmp(quad->op, "BITOR") == 0 || strcmp(quad->op, "|") == 0) {
+            sprintf(instr, "    or %s, %s, %s", 
+                   getRegisterName(regResult),
+                   getRegisterName(regArg1),
+                   getRegisterName(regArg2));
+        } else if (strcmp(quad->op, "BITXOR") == 0 || strcmp(quad->op, "^") == 0) {
+            sprintf(instr, "    xor %s, %s, %s", 
+                   getRegisterName(regResult),
+                   getRegisterName(regArg1),
+                   getRegisterName(regArg2));
+        } else if (strcmp(quad->op, "LSHIFT") == 0 || strcmp(quad->op, "<<") == 0) {
+            // Check if shift amount is constant
+            if (isConstantValue(quad->arg2)) {
+                int shiftAmount = atoi(quad->arg2);
+                sprintf(instr, "    sll %s, %s, %d", 
+                       getRegisterName(regResult),
+                       getRegisterName(regArg1),
+                       shiftAmount);
+            } else {
+                sprintf(instr, "    sllv %s, %s, %s", 
+                       getRegisterName(regResult),
+                       getRegisterName(regArg1),
+                       getRegisterName(regArg2));
+            }
+        } else if (strcmp(quad->op, "RSHIFT") == 0 || strcmp(quad->op, ">>") == 0) {
+            // Check if shift amount is constant
+            if (isConstantValue(quad->arg2)) {
+                int shiftAmount = atoi(quad->arg2);
+                // Use sra (arithmetic shift) to preserve sign bit
+                sprintf(instr, "    sra %s, %s, %d", 
+                       getRegisterName(regResult),
+                       getRegisterName(regArg1),
+                       shiftAmount);
+            } else {
+                // Use srav (arithmetic shift variable) to preserve sign bit
+                sprintf(instr, "    srav %s, %s, %s", 
+                       getRegisterName(regResult),
+                       getRegisterName(regArg1),
+                       getRegisterName(regArg2));
+            }
+        } else {
+            return;
+        }
+        
+        emitMIPS(codegen, instr);
+        updateDescriptors(codegen, regResult, quad->result);
+    }
+    codegen->regDescriptors[getReg(codegen, quad->result, irIndex)].isDirty = true;
+}
+
 // ============================================================================
 // PHASE 3: Advanced Features - Function Calls, Arrays, Pointers, I/O
 // ============================================================================
@@ -2262,6 +2340,18 @@ void translateReturn(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
         
         emitMIPS(codegen, "");
         emitMIPS(codegen, "    # Function epilogue");
+        
+        // If this is main function, print the return value before returning
+        if (strcmp(codegen->currentFunction->funcName, "main") == 0) {
+            emitMIPS(codegen, "    # Print return value (for testing)");
+            emitMIPS(codegen, "    move $a0, $v0  # save return value");
+            emitMIPS(codegen, "    li $v0, 1      # syscall 1: print integer");
+            emitMIPS(codegen, "    syscall");
+            emitMIPS(codegen, "    li $v0, 11     # syscall 11: print character");
+            emitMIPS(codegen, "    li $a0, 10     # newline");
+            emitMIPS(codegen, "    syscall");
+        }
+        
         sprintf(instr, "    lw $ra, %d($sp)", frameSize - 4);
         emitMIPS(codegen, instr);
         sprintf(instr, "    lw $fp, %d($sp)", frameSize - 8);
@@ -3098,6 +3188,14 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
              strcmp(quad->op, "NOT") == 0 || strcmp(quad->op, "!") == 0 ||
              strcmp(quad->op, "&&") == 0 || strcmp(quad->op, "||") == 0) {
         translateLogical(codegen, quad, irIndex);
+    }
+    // Bitwise operations
+    else if (strcmp(quad->op, "BITAND") == 0 || strcmp(quad->op, "BITOR") == 0 ||
+             strcmp(quad->op, "BITXOR") == 0 || strcmp(quad->op, "BITNOT") == 0 ||
+             strcmp(quad->op, "LSHIFT") == 0 || strcmp(quad->op, "RSHIFT") == 0 ||
+             strcmp(quad->op, "<<") == 0 || strcmp(quad->op, ">>") == 0 ||
+             strcmp(quad->op, "~") == 0) {
+        translateBitwise(codegen, quad, irIndex);
     }
     // Assignment
     else if (strcmp(quad->op, "ASSIGN") == 0 || strcmp(quad->op, "=") == 0) {

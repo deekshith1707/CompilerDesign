@@ -186,6 +186,12 @@ static char* getCurrentSwitchDefault() {
 static char* get_constant_value_from_expression(TreeNode* node) {
     if (!node) return NULL;
     
+    // Use a rotating set of static buffers to avoid reuse issues
+    static char value_buffers[4][64];
+    static int buffer_index = 0;
+    char* current_buffer = value_buffers[buffer_index];
+    buffer_index = (buffer_index + 1) % 4;
+    
     switch (node->type) {
         case NODE_CONSTANT:
         case NODE_INTEGER_CONSTANT:
@@ -199,11 +205,40 @@ static char* get_constant_value_from_expression(TreeNode* node) {
             extern Symbol* lookupSymbol(const char* name);
             Symbol* sym = lookupSymbol(node->value);
             if (sym && strcmp(sym->kind, "enum_constant") == 0) {
-                static char enum_val_buf[32];
-                sprintf(enum_val_buf, "%d", sym->offset);
-                return enum_val_buf;
+                sprintf(current_buffer, "%d", sym->offset);
+                return current_buffer;
             }
             return NULL; // Not a constant
+        }
+        
+        case NODE_UNARY_EXPRESSION: {
+            // Check if this node already has the computed value (for constant folding like -1)
+            if (node->value && node->value[0] >= '0' && node->value[0] <= '9') {
+                return node->value;
+            }
+            if (node->value && node->value[0] == '-' && node->value[1] >= '0' && node->value[1] <= '9') {
+                return node->value;
+            }
+            
+            // Handle unary minus for negative constants
+            if (node->value && (strcmp(node->value, "-") == 0 || strcmp(node->value, "-_unary") == 0) && node->childCount == 1) {
+                char* child_val = get_constant_value_from_expression(node->children[0]);
+                if (child_val) {
+                    if (child_val[0] == '-') {
+                        // Double negative, remove the minus
+                        snprintf(current_buffer, 64, "%s", child_val + 1);
+                    } else {
+                        // Add minus sign
+                        snprintf(current_buffer, 64, "-%s", child_val);
+                    }
+                    return current_buffer;
+                }
+            }
+            // Handle unary plus (just return child value)
+            if (node->value && (strcmp(node->value, "+") == 0 || strcmp(node->value, "+_unary") == 0) && node->childCount == 1) {
+                return get_constant_value_from_expression(node->children[0]);
+            }
+            return NULL;
         }
     }
     
@@ -249,7 +284,14 @@ static void find_case_labels(TreeNode* node, std::vector<CaseLabel>& cases, char
                 }
                 
                 char label_name[128];
-                sprintf(label_name, "SWITCH_%d_CASE_%s", switch_id, const_val);
+                // Sanitize const_val for use in label (replace '-' with 'NEG_')
+                char sanitized_val[64];
+                if (const_val[0] == '-') {
+                    snprintf(sanitized_val, sizeof(sanitized_val), "NEG_%s", const_val + 1);
+                } else {
+                    snprintf(sanitized_val, sizeof(sanitized_val), "%s", const_val);
+                }
+                sprintf(label_name, "SWITCH_%d_CASE_%s", switch_id, sanitized_val);
                 cases.push_back({strdup(const_val), strdup(label_name)});
             }
             if (node->childCount > 1) {
@@ -703,18 +745,21 @@ char* generate_ir(TreeNode* node) {
                 }
             }
             else if (strcmp(node->value, "break") == 0) {
-                if (loopDepth > 0) {
+                // CRITICAL FIX: Check switch context FIRST before loop context
+                // When break is inside a switch that's inside a loop,
+                // it should break from the switch, NOT the loop
+                char* switch_end_label = getCurrentSwitchEnd();
+                if (switch_end_label) {
+                    // Inside a switch - break from switch
+                    emit("GOTO", switch_end_label, "", "");
+                    last_was_unconditional_jump = true;
+                } else if (loopDepth > 0) {
+                    // Inside a loop (but not in a switch) - break from loop
                     int break_jump_index = emitWithIndex("GOTO", "0", "", "");
                     addBreakJump(break_jump_index);
                     last_was_unconditional_jump = true;
                 } else {
-                    char* break_label = getCurrentSwitchEnd();
-                    if (break_label) {
-                        emit("GOTO", break_label, "", "");
-                        last_was_unconditional_jump = true;
-                    } else {
-                        cerr << "Error: break statement outside loop or switch" << endl;
-                    }
+                    cerr << "Error: break statement outside loop or switch" << endl;
                 }
             }
             else if (strcmp(node->value, "return") == 0) {
@@ -744,13 +789,21 @@ char* generate_ir(TreeNode* node) {
                     char* const_val = get_constant_value_from_expression(node->children[0]);
                     if (const_val) {
                         int switch_id = getCurrentSwitchId();
+                        // Sanitize const_val for use in label (replace '-' with 'NEG_')
+                        char sanitized_val[64];
+                        if (const_val[0] == '-') {
+                            snprintf(sanitized_val, sizeof(sanitized_val), "NEG_%s", const_val + 1);
+                        } else {
+                            snprintf(sanitized_val, sizeof(sanitized_val), "%s", const_val);
+                        }
+                        
                         if (switch_id >= 0) {
                             char case_label[128];
-                            sprintf(case_label, "SWITCH_%d_CASE_%s", switch_id, const_val);
+                            sprintf(case_label, "SWITCH_%d_CASE_%s", switch_id, sanitized_val);
                             emit("LABEL", case_label, "", "");
                         } else {
                             char case_label[128];
-                            sprintf(case_label, "CASE_%s", const_val);
+                            sprintf(case_label, "CASE_%s", sanitized_val);
                             emit("LABEL", case_label, "", "");
                         }
                     } else {
