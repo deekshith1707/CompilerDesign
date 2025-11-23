@@ -682,9 +682,18 @@ int is_type_name(const char* name) {
 }
 
 int isArithmeticType(const char* type) {
-    return (strcmp(type, "int") == 0 || strcmp(type, "char") == 0 ||
-            strcmp(type, "short") == 0 || strcmp(type, "long") == 0 ||
-            strcmp(type, "float") == 0 || strcmp(type, "double") == 0);
+    if (!type) return 0;
+    
+    // Resolve typedef first to get underlying type
+    char* resolved = resolveTypedef(type);
+    const char* actual_type = resolved ? resolved : type;
+    
+    int result = (strcmp(actual_type, "int") == 0 || strcmp(actual_type, "char") == 0 ||
+            strcmp(actual_type, "short") == 0 || strcmp(actual_type, "long") == 0 ||
+            strcmp(actual_type, "float") == 0 || strcmp(actual_type, "double") == 0);
+    
+    if (resolved) free(resolved);
+    return result;
 }
 
 int isIntegerType(const char* type) {

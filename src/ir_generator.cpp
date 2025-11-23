@@ -1007,21 +1007,29 @@ char* generate_ir(TreeNode* node) {
                         int struct_size = 0;
                         const char* member_type = NULL;
                         
-                        if (base->dataType && strncmp(base->dataType, "struct ", 7) == 0) {
-                            const char* struct_name = base->dataType + 7;
-                            extern StructDef* lookupStruct(const char* name);
-                            StructDef* struct_def = lookupStruct(struct_name);
+                        if (base->dataType) {
+                            // CRITICAL: Resolve typedef to get actual struct type
+                            char* resolved_type = resolveTypedef(base->dataType);
+                            const char* actual_type = resolved_type ? resolved_type : base->dataType;
                             
-                            if (struct_def) {
-                                struct_size = struct_def->total_size;
-                                for (int i = 0; i < struct_def->member_count; i++) {
-                                    if (strcmp(struct_def->members[i].name, member) == 0) {
-                                        member_offset = struct_def->members[i].offset;
-                                        member_type = struct_def->members[i].type;
-                                        break;
+                            if (strncmp(actual_type, "struct ", 7) == 0) {
+                                const char* struct_name = actual_type + 7;
+                                extern StructDef* lookupStruct(const char* name);
+                                StructDef* struct_def = lookupStruct(struct_name);
+                                
+                                if (struct_def) {
+                                    struct_size = struct_def->total_size;
+                                    for (int i = 0; i < struct_def->member_count; i++) {
+                                        if (strcmp(struct_def->members[i].name, member) == 0) {
+                                            member_offset = struct_def->members[i].offset;
+                                            member_type = struct_def->members[i].type;
+                                            break;
+                                        }
                                     }
                                 }
                             }
+                            
+                            if (resolved_type) free(resolved_type);
                         }
                         
                         if (member_type && node->children[1]->dataType && 
@@ -1067,19 +1075,27 @@ char* generate_ir(TreeNode* node) {
                         Symbol* sym = lookupSymbol(struct_var);
                         const char* target_type = NULL;
                         
-                        if (sym && sym->type && strncmp(sym->type, "struct ", 7) == 0) {
-                            const char* struct_name = sym->type + 7;
-                            extern StructDef* lookupStruct(const char* name);
-                            StructDef* struct_def = lookupStruct(struct_name);
+                        if (sym && sym->type) {
+                            // CRITICAL: Resolve typedef to get actual struct type
+                            char* resolved_type = resolveTypedef(sym->type);
+                            const char* actual_type = resolved_type ? resolved_type : sym->type;
                             
-                            if (struct_def) {
-                                for (int i = 0; i < struct_def->member_count; i++) {
-                                    if (strcmp(struct_def->members[i].name, member) == 0) {
-                                        target_type = struct_def->members[i].type;
-                                        break;
+                            if (strncmp(actual_type, "struct ", 7) == 0) {
+                                const char* struct_name = actual_type + 7;
+                                extern StructDef* lookupStruct(const char* name);
+                                StructDef* struct_def = lookupStruct(struct_name);
+                                
+                                if (struct_def) {
+                                    for (int i = 0; i < struct_def->member_count; i++) {
+                                        if (strcmp(struct_def->members[i].name, member) == 0) {
+                                            target_type = struct_def->members[i].type;
+                                            break;
+                                        }
                                     }
                                 }
                             }
+                            
+                            if (resolved_type) free(resolved_type);
                         }
                         
                         if (target_type && node->children[1]->dataType && 
@@ -1091,18 +1107,26 @@ char* generate_ir(TreeNode* node) {
                         emit("ADDR", struct_var, "", struct_addr);
                         
                         int member_offset = 0;
-                        if (sym && sym->type && strncmp(sym->type, "struct ", 7) == 0) {
-                            const char* struct_name = sym->type + 7;
-                            extern StructDef* lookupStruct(const char* name);
-                            StructDef* struct_def = lookupStruct(struct_name);
-                            if (struct_def) {
-                                for (int i = 0; i < struct_def->member_count; i++) {
-                                    if (strcmp(struct_def->members[i].name, member) == 0) {
-                                        member_offset = struct_def->members[i].offset;
-                                        break;
+                        if (sym && sym->type) {
+                            // CRITICAL: Resolve typedef to get actual struct type
+                            char* resolved_type = resolveTypedef(sym->type);
+                            const char* actual_type = resolved_type ? resolved_type : sym->type;
+                            
+                            if (strncmp(actual_type, "struct ", 7) == 0) {
+                                const char* struct_name = actual_type + 7;
+                                extern StructDef* lookupStruct(const char* name);
+                                StructDef* struct_def = lookupStruct(struct_name);
+                                if (struct_def) {
+                                    for (int i = 0; i < struct_def->member_count; i++) {
+                                        if (strcmp(struct_def->members[i].name, member) == 0) {
+                                            member_offset = struct_def->members[i].offset;
+                                            break;
+                                        }
                                     }
                                 }
                             }
+                            
+                            if (resolved_type) free(resolved_type);
                         }
                         
                         char offset_str[32];
@@ -2010,20 +2034,28 @@ char* generate_ir(TreeNode* node) {
                     int member_offset = 0;
                     int struct_size = 0;
                     
-                    if (base->dataType && strncmp(base->dataType, "struct ", 7) == 0) {
-                        const char* struct_name = base->dataType + 7;
-                        extern StructDef* lookupStruct(const char* name);
-                        StructDef* struct_def = lookupStruct(struct_name);
+                    if (base->dataType) {
+                        // CRITICAL: Resolve typedef to get actual struct type
+                        char* resolved_type = resolveTypedef(base->dataType);
+                        const char* actual_type = resolved_type ? resolved_type : base->dataType;
                         
-                        if (struct_def) {
-                            struct_size = struct_def->total_size;
-                            for (int i = 0; i < struct_def->member_count; i++) {
-                                if (strcmp(struct_def->members[i].name, member) == 0) {
-                                    member_offset = struct_def->members[i].offset;
-                                    break;
+                        if (strncmp(actual_type, "struct ", 7) == 0) {
+                            const char* struct_name = actual_type + 7;
+                            extern StructDef* lookupStruct(const char* name);
+                            StructDef* struct_def = lookupStruct(struct_name);
+                            
+                            if (struct_def) {
+                                struct_size = struct_def->total_size;
+                                for (int i = 0; i < struct_def->member_count; i++) {
+                                    if (strcmp(struct_def->members[i].name, member) == 0) {
+                                        member_offset = struct_def->members[i].offset;
+                                        break;
+                                    }
                                 }
                             }
                         }
+                        
+                        if (resolved_type) free(resolved_type);
                     }
                     
                     char* elem_addr = newTemp();
@@ -2069,8 +2101,12 @@ char* generate_ir(TreeNode* node) {
                     extern Symbol* lookupSymbol(const char* name);
                     Symbol* sym = lookupSymbol(struct_var);
                     if (sym && sym->type) {
-                        if (strncmp(sym->type, "struct ", 7) == 0) {
-                            const char* struct_name = sym->type + 7;
+                        // CRITICAL: Resolve typedef to get actual struct/union type
+                        char* resolved_type = resolveTypedef(sym->type);
+                        const char* actual_type = resolved_type ? resolved_type : sym->type;
+                        
+                        if (strncmp(actual_type, "struct ", 7) == 0) {
+                            const char* struct_name = actual_type + 7;
                             extern StructDef* lookupStruct(const char* name);
                             StructDef* struct_def = lookupStruct(struct_name);
                             if (struct_def) {
@@ -2083,8 +2119,8 @@ char* generate_ir(TreeNode* node) {
                                 }
                             }
                         }
-                        else if (strncmp(sym->type, "union ", 6) == 0) {
-                            const char* union_name = sym->type + 6;
+                        else if (strncmp(actual_type, "union ", 6) == 0) {
+                            const char* union_name = actual_type + 6;
                             extern StructDef* lookupUnion(const char* name);
                             StructDef* union_def = lookupUnion(union_name);
                             if (union_def) {
@@ -2097,6 +2133,8 @@ char* generate_ir(TreeNode* node) {
                                 }
                             }
                         }
+                        
+                        if (resolved_type) free(resolved_type);
                     }
                     
                     char* struct_addr = newTemp();
@@ -2129,8 +2167,12 @@ char* generate_ir(TreeNode* node) {
                         struct_type[--len] = '\0';
                     }
                     
-                    if (strncmp(struct_type, "struct ", 7) == 0) {
-                        const char* struct_name = struct_type + 7;
+                    // CRITICAL: Resolve typedef to get actual struct type
+                    char* resolved_type = resolveTypedef(struct_type);
+                    const char* actual_type = resolved_type ? resolved_type : struct_type;
+                    
+                    if (strncmp(actual_type, "struct ", 7) == 0) {
+                        const char* struct_name = actual_type + 7;
                         extern StructDef* lookupStruct(const char* name);
                         StructDef* struct_def = lookupStruct(struct_name);
                         
@@ -2143,6 +2185,8 @@ char* generate_ir(TreeNode* node) {
                             }
                         }
                     }
+                    
+                    if (resolved_type) free(resolved_type);
                 }
                 
                 char offset_str[32];
