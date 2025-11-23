@@ -688,9 +688,11 @@ int isArithmeticType(const char* type) {
     char* resolved = resolveTypedef(type);
     const char* actual_type = resolved ? resolved : type;
     
+    // Enums are integer types in C, so they're arithmetic types
     int result = (strcmp(actual_type, "int") == 0 || strcmp(actual_type, "char") == 0 ||
             strcmp(actual_type, "short") == 0 || strcmp(actual_type, "long") == 0 ||
-            strcmp(actual_type, "float") == 0 || strcmp(actual_type, "double") == 0);
+            strcmp(actual_type, "float") == 0 || strcmp(actual_type, "double") == 0 ||
+            strcmp(actual_type, "enum") == 0);
     
     if (resolved) free(resolved);
     return result;
@@ -1288,6 +1290,15 @@ TypeCheckResult checkAssignment(TreeNode* lhs, TreeNode* rhs) {
     
     // Same type
     if (strcmp(ltype, rtype) == 0) {
+        free(rtype_decayed);
+        if (ltype_resolved) free(ltype_resolved);
+        if (rtype_resolved) free(rtype_resolved);
+        return TYPE_OK;
+    }
+    
+    // Enum and int are compatible in C
+    if ((strcmp(ltype, "enum") == 0 && isIntegerType(rtype)) ||
+        (strcmp(rtype, "enum") == 0 && isIntegerType(ltype))) {
         free(rtype_decayed);
         if (ltype_resolved) free(ltype_resolved);
         if (rtype_resolved) free(rtype_resolved);

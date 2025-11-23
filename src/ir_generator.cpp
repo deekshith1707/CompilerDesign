@@ -389,6 +389,16 @@ char* generate_ir(TreeNode* node) {
                 generate_ir(node->children[i]);
             }
             
+            // Check if this is an enum constant - treat as integer constant
+            extern Symbol* lookupSymbol(const char* name);
+            Symbol* sym = lookupSymbol(node->value);
+            if (sym && strcmp(sym->kind, "enum_constant") == 0) {
+                // Return the enum value as a string
+                char* enum_value = (char*)malloc(32);
+                sprintf(enum_value, "%d", sym->offset);
+                return enum_value;
+            }
+            
             if (isStaticVariable(node->value)) {
                 return getStaticVarName(node->value);
             }
