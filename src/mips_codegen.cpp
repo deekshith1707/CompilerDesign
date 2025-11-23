@@ -685,7 +685,11 @@ int findOrCreateAddrDesc(MIPSCodeGenerator* codegen, const char* varName) {
     
     int idx = codegen->addrDescCount++;
     strcpy(codegen->addrDescriptors[idx].varName, varName);
-    codegen->addrDescriptors[idx].inMemory = true;   // Assume in memory initially
+    
+    // CRITICAL FIX: Temporaries start in registers, not memory
+    // Only assume in memory if it's a regular variable (from symbol table or activation record)
+    bool isTemp = (varName[0] == 't' && isdigit(varName[1]));
+    codegen->addrDescriptors[idx].inMemory = !isTemp;   // Temps NOT in memory initially
     codegen->addrDescriptors[idx].inRegister = -1;    // Not in register yet
     codegen->addrDescriptors[idx].memoryOffset = 0;
     codegen->addrDescriptors[idx].isGlobal = false;
@@ -696,6 +700,8 @@ int findOrCreateAddrDesc(MIPSCodeGenerator* codegen, const char* varName) {
             if (strcmp(codegen->currentFunction->variables[v].varName, varName) == 0) {
                 codegen->addrDescriptors[idx].memoryOffset = 
                     codegen->currentFunction->variables[v].offset;
+                // If found in activation record, it has a memory location
+                codegen->addrDescriptors[idx].inMemory = true;
                 break;
             }
         }
@@ -859,14 +865,9 @@ void getMemoryLocation(MIPSCodeGenerator* codegen, const char* varName, char* lo
         return;
     }
     
-    // Otherwise, it's a local variable - get offset from activation record
-    int addrIdx = findAddressDescriptor(codegen, varName);
-    if (addrIdx >= 0 && codegen->addrDescriptors[addrIdx].memoryOffset != 0) {
-        sprintf(location, "%d($fp)", codegen->addrDescriptors[addrIdx].memoryOffset);
-        return;
-    }
-    
-    // FIX: Look up offset directly from activation record
+    // CRITICAL FIX: Always look up offset directly from activation record for local variables
+    // This ensures we get the correct, authoritative memory location for each variable
+    // Don't rely on address descriptor's memoryOffset which may be stale or incorrect
     if (codegen->currentFunction != NULL) {
         for (int i = 0; i < codegen->currentFunction->varCount; i++) {
             if (strcmp(codegen->currentFunction->variables[i].varName, varName) == 0) {
@@ -874,6 +875,13 @@ void getMemoryLocation(MIPSCodeGenerator* codegen, const char* varName, char* lo
                 return;
             }
         }
+    }
+    
+    // Fallback: check address descriptor (for variables not in activation record)
+    int addrIdx = findAddressDescriptor(codegen, varName);
+    if (addrIdx >= 0 && codegen->addrDescriptors[addrIdx].memoryOffset != 0) {
+        sprintf(location, "%d($fp)", codegen->addrDescriptors[addrIdx].memoryOffset);
+        return;
     }
     
     // Still not found - this is an error, but provide a fallback
@@ -1081,6 +1089,20 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
         }
     }
     
+    // CRITICAL FIX: Address descriptor might be stale - search ALL registers
+    // to see if any of them currently holds this variable
+    for (int r = REG_T0; r <= REG_T9; r++) {
+        for (int v = 0; v < codegen->regDescriptors[r].varCount; v++) {
+            if (strcmp(codegen->regDescriptors[r].varNames[v], varName) == 0) {
+                // Found it! Update address descriptor and return
+                if (addrIdx >= 0) {
+                    codegen->addrDescriptors[addrIdx].inRegister = r;
+                }
+                return r;
+            }
+        }
+    }
+    
     // CASE 2: Find an empty temporary register
     for (int r = REG_T0; r <= REG_T9; r++) {
         if (codegen->regDescriptors[r].varCount == 0) {
@@ -1088,8 +1110,10 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
             // Load from memory if:
             // 1. Variable has inMemory flag set (was previously stored), OR  
             // 2. Variable is a global/static variable (in .data section), OR
-            // 3. Variable is a parameter (saved to stack in prologue), OR
-            // 4. Variable has address descriptor AND exists in activation record
+            // 3. Variable is a parameter (saved to stack in prologue)
+            //
+            // CRITICAL FIX: Do NOT load temporaries that have never been stored (inMemory = false)
+            // Temporaries only exist in registers until explicitly spilled
             bool shouldLoad = false;
             
             if (addrIdx >= 0 && codegen->addrDescriptors[addrIdx].inMemory) {
@@ -1106,16 +1130,6 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
                     if (strcmp(params[p], varName) == 0) {
                         shouldLoad = true;
                         break;
-                    }
-                }
-                
-                // If not a parameter, only load if it has address descriptor
-                if (!shouldLoad && addrIdx >= 0) {
-                    for (int i = 0; i < codegen->currentFunction->varCount; i++) {
-                        if (strcmp(codegen->currentFunction->variables[i].varName, varName) == 0) {
-                            shouldLoad = true;
-                            break;
-                        }
                     }
                 }
             }
@@ -1405,6 +1419,93 @@ void translateArithmetic(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
 void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     char instr[256];
     
+    // CRITICAL FIX: Handle array access in assignment (arr[i] syntax)
+    // If arg1 contains '[', parse it and load the array element directly
+    if (strchr(quad->arg1, '[') != NULL) {
+        char arrayName[128];
+        char indexStr[128];
+        
+        // Parse "arr[index]" into arrayName and indexStr
+        const char* bracket = strchr(quad->arg1, '[');
+        int nameLen = bracket - quad->arg1;
+        strncpy(arrayName, quad->arg1, nameLen);
+        arrayName[nameLen] = '\0';
+        
+        // Extract index
+        const char* closeBracket = strchr(bracket, ']');
+        int indexLen = closeBracket - bracket - 1;
+        strncpy(indexStr, bracket + 1, indexLen);
+        indexStr[indexLen] = '\0';
+        
+        // Get array base offset
+        char arrayLocation[128];
+        getMemoryLocation(codegen, arrayName, arrayLocation);
+        int baseOffset = 0;
+        if (strstr(arrayLocation, "($fp)") != NULL) {
+            sscanf(arrayLocation, "%d($fp)", &baseOffset);
+        }
+        
+        // Check element size
+        bool isCharArray = false;
+        int elementSize = getArrayElementInfo(arrayName, &isCharArray);
+        
+        // Get register for result
+        int resultReg = getReg(codegen, quad->result, irIndex);
+        
+        // Generate code to load array element
+        if (isConstantValue(indexStr)) {
+            // Constant index
+            int index = atoi(indexStr);
+            int totalOffset = baseOffset + (index * elementSize);
+            if (isCharArray) {
+                sprintf(instr, "    lb %s, %d($fp)", getRegisterName(resultReg), totalOffset);
+            } else {
+                sprintf(instr, "    lw %s, %d($fp)", getRegisterName(resultReg), totalOffset);
+            }
+            emitMIPS(codegen, instr);
+        } else {
+            // Variable index
+            int indexReg = getReg(codegen, indexStr, irIndex);
+            
+            // Calculate offset
+            if (elementSize == 4) {
+                sprintf(instr, "    sll $t8, %s, 2", getRegisterName(indexReg));
+            } else if (elementSize == 1) {
+                sprintf(instr, "    move $t8, %s", getRegisterName(indexReg));
+            } else {
+                sprintf(instr, "    li $t9, %d", elementSize);
+                emitMIPS(codegen, instr);
+                sprintf(instr, "    mul $t8, %s, $t9", getRegisterName(indexReg));
+            }
+            emitMIPS(codegen, instr);
+            
+            sprintf(instr, "    addi $t8, $t8, %d", baseOffset);
+            emitMIPS(codegen, instr);
+            
+            sprintf(instr, "    add $t8, $t8, $fp");
+            emitMIPS(codegen, instr);
+            
+            if (isCharArray) {
+                sprintf(instr, "    lb %s, 0($t8)", getRegisterName(resultReg));
+            } else {
+                sprintf(instr, "    lw %s, 0($t8)", getRegisterName(resultReg));
+            }
+            emitMIPS(codegen, instr);
+        }
+        
+        // Update descriptors
+        updateDescriptors(codegen, resultReg, quad->result);
+        codegen->regDescriptors[resultReg].isDirty = false;
+        
+        // Store to memory immediately for reloadability
+        storeVariable(codegen, quad->result, resultReg);
+        int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+        if (addrIdx >= 0) {
+            codegen->addrDescriptors[addrIdx].inMemory = true;
+        }
+        return;
+    }
+    
     // CHECK: If arg1 starts with '&', this is an address-of operation
     // Example: t20 = &input_int
     // CRITICAL: We compute the ADDRESS and store it in the RESULT temporary
@@ -1561,13 +1662,18 @@ void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
     
     // CRITICAL FIX: If result is a global/static variable, store to memory immediately
     // This ensures the value persists across function calls
-    if (isGlobalVariable(codegen, quad->result)) {
-        storeVariable(codegen, quad->result, regDest);
+    // ALSO store ALL variables to memory for correctness (temporaries need to be reloadable)
+    storeVariable(codegen, quad->result, regDest);
+    
+    // Update address descriptor to reflect it's in memory
+    int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+    if (addrIdx >= 0) {
+        codegen->addrDescriptors[addrIdx].inMemory = true;
     }
     
     // Update descriptors
     updateDescriptors(codegen, regDest, quad->result);
-    codegen->regDescriptors[regDest].isDirty = true;
+    codegen->regDescriptors[regDest].isDirty = false;  // Not dirty since we just stored it
 }
 
 /**
