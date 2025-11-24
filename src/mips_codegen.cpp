@@ -477,6 +477,21 @@ int getArrayElementInfo(const char* arrayName, bool* isCharArray) {
     return 4;
 }
 
+/**
+ * Check if a variable is a pointer (not an array)
+ * Returns true for int* ptr, false for int arr[]
+ */
+bool isPointerVariable(const char* varName) {
+    // Search symbol table (without scope restrictions, like getArrayElementInfo)
+    for (int i = 0; i < symCount; i++) {
+        if (strcmp(symtab[i].name, varName) == 0) {
+            // It's a pointer if ptr_level > 0 AND not an array
+            return (symtab[i].ptr_level > 0 && !symtab[i].is_array);
+        }
+    }
+    return false;
+}
+
 // ============================================================================
 // Task 1.4: Build Activation Records for All Functions
 // ============================================================================
@@ -2612,8 +2627,7 @@ void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
     const char* resultVar = quad->result;
     
     // Check if this is a pointer dereference (ptr[i]) or array access (arr[i])
-    Symbol* arraySym = lookupSymbol(arrayName);
-    bool isPointerAccess = (arraySym != NULL && arraySym->ptr_level > 0 && !arraySym->is_array);
+    bool isPointerAccess = isPointerVariable(arrayName);
     
     // Get actual element size from symbol table
     bool isCharArray = false;
