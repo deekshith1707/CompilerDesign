@@ -1,0 +1,120 @@
+// Test file for reference operations (pointer-based)
+// C doesn't have true references like C++, but we can test pointer semantics
+// Returns 0 on success, or line number on failure
+
+void swap(int* a, int* b) {
+    int temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+void increment(int* x) {
+    *x = *x + 1;
+}
+
+void modify_array(int* arr, int size) {
+    int i = 0;
+    while (i < size) {
+        *(arr + i) = *(arr + i) * 2;
+        i = i + 1;
+    }
+}
+
+int main() {
+    int a = 10;
+    int b = 20;
+    int c = 30;
+    int arr[5];
+    int i = 0;
+    
+    // Initialize array
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+    
+    // Test 1: Pass by reference - swap
+    swap(&a, &b);
+    if (a != 20) {
+        return 38;
+    }
+    if (b != 10) {
+        return 41;
+    }
+    
+    // Test 2: Swap back
+    swap(&a, &b);
+    if (a != 10) {
+        return 47;
+    }
+    if (b != 20) {
+        return 50;
+    }
+    
+    // Test 3: Increment through reference
+    increment(&a);
+    if (a != 11) {
+        return 56;
+    }
+    
+    // Test 4: Multiple increments
+    increment(&a);
+    increment(&a);
+    if (a != 13) {
+        return 63;
+    }
+    
+    // Test 5: Increment different variable
+    increment(&c);
+    if (c != 31) {
+        return 69;
+    }
+    
+    // Test 6: Modify array through reference
+    modify_array(arr, 5);
+    // Array should be doubled: [2, 4, 6, 8, 10]
+    if (arr[0] != 2) {
+        return 76;
+    }
+    if (arr[4] != 10) {
+        return 79;
+    }
+    
+    // Test 7: Swap array elements
+    swap(&arr[0], &arr[4]);
+    if (arr[0] != 10) {
+        return 85;
+    }
+    if (arr[4] != 2) {
+        return 88;
+    }
+    
+    // Test 8: Reference to array element
+    int* ptr = &arr[2];
+    *ptr = 100;
+    if (arr[2] != 100) {
+        return 95;
+    }
+    
+    // Test 9: Multiple pointer operations
+    int x = 5;
+    int y = 7;
+    int* px = &x;
+    int* py = &y;
+    *px = *py;
+    if (x != 7) {
+        return 105;
+    }
+    
+    // Test 10: Chain of reference modifications
+    int val = 0;
+    increment(&val);
+    increment(&val);
+    increment(&val);
+    if (val != 3) {
+        return 115;
+    }
+    
+    return 0; // All tests passed
+}

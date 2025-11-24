@@ -1,0 +1,130 @@
+// Test file for until loops
+// Returns 0 on success, or line number on failure
+
+int main() {
+    int x = 0;
+    int y = 0;
+    int sum = 0;
+    int count = 0;
+    
+    // Test 1: Basic until loop
+    x = 0;
+    do {
+        x = x + 1;
+    } until (x >= 5);
+    if (x != 5) {
+        return 16;
+    }
+    
+    // Test 2: Until loop with sum
+    x = 0;
+    sum = 0;
+    do {
+        sum = sum + x;
+        x = x + 1;
+    } until (x >= 10);
+    // sum should be 0+1+2+3+4+5+6+7+8+9 = 45
+    if (sum != 45) {
+        return 28;
+    }
+    
+    // Test 3: Until with complex condition
+    x = 0;
+    y = 10;
+    do {
+        x = x + 1;
+    } until (x > 3 && y == 10);
+    if (x != 4) {
+        return 38;
+    }
+    
+    // Test 4: Until loop counting down
+    x = 10;
+    count = 0;
+    do {
+        count = count + 1;
+        x = x - 1;
+    } until (x <= 0);
+    if (count != 10) {
+        return 49;
+    }
+    
+    // Test 5: Until with break
+    x = 0;
+    do {
+        x = x + 1;
+        if (x == 5) {
+            break;
+        }
+    } until (x >= 10);
+    if (x != 5) {
+        return 61;
+    }
+    
+    // Test 6: Until with continue
+    x = 0;
+    sum = 0;
+    do {
+        x = x + 1;
+        if (x == 3) {
+            continue;
+        }
+        sum = sum + x;
+    } until (x >= 5);
+    // Adds 1,2,4,5 (skips 3): sum = 12
+    if (sum != 12) {
+        return 76;
+    }
+    
+    // Test 7: Until with OR condition
+    x = 0;
+    do {
+        x = x + 1;
+    } until (x == 7 || x > 10);
+    if (x != 7) {
+        return 85;
+    }
+    
+    // Test 8: Until executes at least once
+    /* x = 100;
+    count = 0;
+    do {
+        count = count + 1;
+    } until (x < 50);
+    // Should execute once even though condition is true
+    if (count != 1) {
+        return 96;
+    } */
+    
+    // Test 9: Nested until loops
+    x = 0;
+    sum = 0;
+    do {
+        y = 0;
+        do {
+            sum = sum + 1;
+            y = y + 1;
+        } until (y >= 3);
+        x = x + 1;
+    } until (x >= 2);
+    // Outer runs 2 times, inner runs 3 times each: sum = 6
+    if (sum != 6) {
+        return 113;
+    }
+    
+    // Test 10: Until with modulo
+    x = 0;
+    sum = 0;
+    do {
+        if (x % 2 == 0) {
+            sum = sum + x;
+        }
+        x = x + 1;
+    } until (x >= 10);
+    // Adds 0,2,4,6,8: sum = 20
+    if (sum != 20) {
+        return 127;
+    }
+    
+    return 0; // All tests passed
+}

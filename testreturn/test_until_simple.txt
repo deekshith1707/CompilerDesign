@@ -1,0 +1,13 @@
+// Simple until test
+int main() {
+    int x = 0;
+    do {
+        x = x + 1;
+    } until (x >= 3);
+    
+    if (x != 3) {
+        return 10;
+    }
+    
+    return 0;
+}

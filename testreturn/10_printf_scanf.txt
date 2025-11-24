@@ -1,0 +1,71 @@
+// Test file for printf and scanf (testreturn version)
+// Since we can't actually use printf/scanf in testreturn format,
+// this tests the underlying operations that would be used
+// Returns 0 on success, or line number on failure
+
+int main() {
+    int a = 0;
+    int b = 0;
+    int result = 0;
+    
+    // Test 1: Basic integer assignment (simulating input)
+    a = 10;
+    b = 20;
+    if (a != 10) {
+        return 14;
+    }
+    if (b != 20) {
+        return 17;
+    }
+    
+    // Test 2: Arithmetic operations (would be printed)
+    result = a + b;
+    if (result != 30) {
+        return 23;
+    }
+    
+    // Test 3: Multiple operations
+    result = a * b;
+    if (result != 200) {
+        return 29;
+    }
+    
+    result = b - a;
+    if (result != 10) {
+        return 34;
+    }
+    
+    // Test 4: Format string simulation - integer to integer
+    a = 42;
+    result = a;
+    if (result != 42) {
+        return 41;
+    }
+    
+    // Test 5: Multiple variable assignments
+    a = 5;
+    b = 7;
+    result = a + b;
+    if (result != 12) {
+        return 49;
+    }
+    
+    // Test 6: Negative numbers
+    a = -15;
+    b = 25;
+    result = a + b;
+    if (result != 10) {
+        return 57;
+    }
+    
+    // Test 7: Chain of operations
+    a = 100;
+    b = 50;
+    result = a - b;
+    result = result + 10;
+    if (result != 60) {
+        return 66;
+    }
+    
+    return 0; // All tests passed
+}

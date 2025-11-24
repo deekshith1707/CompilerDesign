@@ -1,0 +1,71 @@
+// Test file for command line input simulation
+// Since testreturn cannot actually use argc/argv,
+// this tests the underlying operations
+// Returns 0 on success, or line number on failure
+
+int main() {
+    // Simulating command line arguments with array and count
+    int argc = 3;
+    int arg_values[3];
+    arg_values[0] = 100; // program name (simulated as value)
+    arg_values[1] = 42;  // first argument
+    arg_values[2] = 58;  // second argument
+    
+    int result = 0;
+    int i = 0;
+    
+    // Test 1: Check argument count
+    if (argc != 3) {
+        return 18;
+    }
+    
+    // Test 2: Access first argument
+    if (arg_values[1] != 42) {
+        return 23;
+    }
+    
+    // Test 3: Access second argument
+    if (arg_values[2] != 58) {
+        return 28;
+    }
+    
+    // Test 4: Sum all arguments
+    result = 0;
+    i = 1;
+    while (i < argc) {
+        result = result + arg_values[i];
+        i = i + 1;
+    }
+    // Should be 42 + 58 = 100
+    if (result != 100) {
+        return 40;
+    }
+    
+    // Test 5: Process arguments in loop
+    i = 0;
+    result = 0;
+    while (i < argc) {
+        result = result + arg_values[i];
+        i = i + 1;
+    }
+    // Should be 100 + 42 + 58 = 200
+    if (result != 200) {
+        return 52;
+    }
+    
+    // Test 6: Find maximum argument
+    result = arg_values[0];
+    i = 1;
+    while (i < argc) {
+        if (arg_values[i] > result) {
+            result = arg_values[i];
+        }
+        i = i + 1;
+    }
+    // Max should be 100
+    if (result != 100) {
+        return 67;
+    }
+    
+    return 0; // All tests passed
+}

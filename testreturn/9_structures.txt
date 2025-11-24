@@ -1,0 +1,167 @@
+// Test file for structures
+// Returns 0 on success, or line number on failure
+
+struct Point {
+    int x;
+    int y;
+};
+
+struct Rectangle {
+    int width;
+    int height;
+};
+
+struct Student {
+    int id;
+    int age;
+    int marks;
+};
+
+int main() {
+    struct Point p1;
+    struct Point p2;
+    struct Rectangle rect;
+    struct Student s1;
+    int value = 0;
+
+    // Test 1: Basic structure member assignment
+    p1.x = 10;
+    p1.y = 20;
+    if (p1.x != 10) {
+        return 31;
+    }
+    if (p1.y != 20) {
+        return 34;
+    }
+
+    // Test 2: Structure member access in expressions
+    value = p1.x + p1.y;
+    if (value != 30) {
+        return 40;
+    }
+
+    // Test 3: Multiple structures of same type
+    p2.x = 5;
+    p2.y = 15;
+    if (p2.x != 5) {
+        return 47;
+    }
+
+    // Test 4: Structure member multiplication
+    value = p2.x * p2.y;
+    if (value != 75) {
+        return 53;
+    }
+
+    // Test 5: Assign structure member from another structure
+    p1.x = p2.x;
+    if (p1.x != 5) {
+        return 59;
+    }
+
+    // Test 6: Different structure type
+    rect.width = 100;
+    rect.height = 50;
+    if (rect.width != 100) {
+        return 66;
+    }
+    if (rect.height != 50) {
+        return 69;
+    }
+
+    // Test 7: Calculate area using structure
+    value = rect.width * rect.height;
+    if (value != 5000) {
+        return 75;
+    }
+
+    // Test 8: Student structure with multiple fields
+    s1.id = 101;
+    s1.age = 20;
+    s1.marks = 85;
+    if (s1.id != 101) {
+        return 83;
+    }
+    if (s1.age != 20) {
+        return 86;
+    }
+    if (s1.marks != 85) {
+        return 89;
+    }
+
+    // Test 9: Structure member comparison
+    if (s1.marks < 80) {
+        return 94;
+    }
+    if (s1.age > 25) {
+        return 97;
+    }
+
+    // Test 10: Update structure members
+    s1.marks = s1.marks + 10;
+    if (s1.marks != 95) {
+        return 103;
+    }
+
+    // Test 11: Pointer to structure - basic assignment
+    struct Point* pptr;
+    pptr = &p1;
+    pptr->x = 99;
+    if (p1.x != 99) {
+        return 111;
+    }
+
+    // Test 12: Pointer to structure - read value
+    value = pptr->y;
+    if (value != 20) {
+        return 117;
+    }
+
+    // Test 13: Pointer to different structure
+    struct Rectangle* rptr;
+    rptr = &rect;
+    rptr->width = 200;
+    if (rect.width != 200) {
+        return 125;
+    }
+
+    // Test 14: Access through pointer in expression
+    value = rptr->width + rptr->height;
+    if (value != 250) {
+        return 131;
+    }
+
+    // Test 15: Pointer to student structure
+    struct Student* sptr;
+    sptr = &s1;
+    sptr->age = 21;
+    if (s1.age != 21) {
+        return 139;
+    }
+
+    // Test 16: Complex expression with structure pointer
+    value = (sptr->marks * 2) + sptr->age;
+    // (95 * 2) + 21 = 190 + 21 = 211
+    if (value != 211) {
+        return 146;
+    }
+
+    // Test 17: Update multiple fields through pointer
+    pptr->x = 7;
+    pptr->y = 3;
+    if (p1.x != 7) {
+        return 153;
+    }
+    if (p1.y != 3) {
+        return 156;
+    }
+
+    // Test 18: Verify arrow operator correctly updates
+    rptr->height = 75;
+    value = rect.height;
+    if (value != 75) {
+        return 163;
+    }
+
+    return 0; // All tests passed
+}

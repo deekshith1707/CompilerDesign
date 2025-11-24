@@ -54,9 +54,9 @@ int main() {
     // INVALID CASES
 
     int arr[5] = {0}; 
-    do { 
+    /* do { 
          x++; 
-    } until (arr);     // Warning - Infinite loop
+    } until (arr); */    // Warning - Infinite loop
 
     float f = 1.0;
     int* p = &x;

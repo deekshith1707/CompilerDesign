@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # MIPS Code Testing Script for SPIM Simulator
@@ -5,7 +6,7 @@
 
 echo "============================================"
 echo "  MIPS Assembly Testing with SPIM"
-echo "  Date: $(date)"
+echo "  Date: $(date)"                                                                                                                                                                                                                                                                                                                  
 echo "============================================"
 echo ""
 
@@ -54,9 +55,17 @@ run_test() {
     
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
     
+    # Check if there's an input file for this test
+    local input_file="${test_file%.s}.input"
+    
     # Run SPIM with timeout (10 seconds)
     # Capture both stdout and stderr
-    timeout 10s spim -file "$test_file" > "${test_file%.s}.output" 2>&1
+    if [ -f "$input_file" ]; then
+        echo "  Using input from: $input_file"
+        timeout 10s spim -file "$test_file" < "$input_file" > "${test_file%.s}.output" 2>&1
+    else
+        timeout 10s spim -file "$test_file" > "${test_file%.s}.output" 2>&1
+    fi
     EXIT_CODE=$?
     
     if [ $EXIT_CODE -eq 124 ]; then

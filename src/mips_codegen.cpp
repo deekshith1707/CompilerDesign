@@ -1533,6 +1533,13 @@ void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
             // The result temp holds an ADDRESS, not the variable's VALUE
             updateDescriptors(codegen, resultReg, resultVar);
             codegen->regDescriptors[resultReg].isDirty = true;
+            
+            // Store to memory for reloadability
+            storeVariable(codegen, resultVar, resultReg);
+            int addrIdx2 = findOrCreateAddrDesc(codegen, resultVar);
+            if (addrIdx2 >= 0) {
+                codegen->addrDescriptors[addrIdx2].inMemory = true;
+            }
         } else {
             // Global variable - load address
             int resultReg = getReg(codegen, resultVar, irIndex);
@@ -1543,6 +1550,13 @@ void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
             // CRITICAL FIX: Only update descriptor for RESULT, not for varName
             updateDescriptors(codegen, resultReg, resultVar);
             codegen->regDescriptors[resultReg].isDirty = true;
+            
+            // Store to memory for reloadability
+            storeVariable(codegen, resultVar, resultReg);
+            int addrIdx2 = findOrCreateAddrDesc(codegen, resultVar);
+            if (addrIdx2 >= 0) {
+                codegen->addrDescriptors[addrIdx2].inMemory = true;
+            }
         }
         return;
     }
@@ -1588,7 +1602,14 @@ void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
                 
                 // Update descriptors
                 updateDescriptors(codegen, regDest, quad->result);
-                codegen->regDescriptors[regDest].isDirty = true;
+                codegen->regDescriptors[regDest].isDirty = false;
+                
+                // Store to memory for reloadability
+                storeVariable(codegen, quad->result, regDest);
+                int addrIdx3 = findOrCreateAddrDesc(codegen, quad->result);
+                if (addrIdx3 >= 0) {
+                    codegen->addrDescriptors[addrIdx3].inMemory = true;
+                }
                 return;
             }
         }
@@ -2668,6 +2689,16 @@ void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         emitMIPS(codegen, instr);
         
         updateDescriptors(codegen, resultReg, resultVar);
+        
+        // CRITICAL FIX: Store result to memory immediately after loading from array
+        // This ensures that if the register is spilled later, the memory location has the correct value
+        // Without this, if t43 = intArr[3] loads into $t1, but later $t1 is reused and t43 is reloaded,
+        // it would reload from t43's stack slot which was never written to
+        storeVariable(codegen, resultVar, resultReg);
+        int addrIdx = findAddressDescriptor(codegen, resultVar);
+        if (addrIdx >= 0) {
+            codegen->addrDescriptors[addrIdx].inMemory = true;
+        }
     } else {
         // Variable index - calculate at runtime
         int indexReg = getReg(codegen, indexVar, irIndex);
@@ -2708,6 +2739,14 @@ void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         emitMIPS(codegen, instr);
         
         updateDescriptors(codegen, resultReg, resultVar);
+        
+        // CRITICAL FIX: Store result to memory immediately after loading from array
+        // This ensures that if the register is spilled later, the memory location has the correct value
+        storeVariable(codegen, resultVar, resultReg);
+        int addrIdx = findAddressDescriptor(codegen, resultVar);
+        if (addrIdx >= 0) {
+            codegen->addrDescriptors[addrIdx].inMemory = true;
+        }
     }
 }
 

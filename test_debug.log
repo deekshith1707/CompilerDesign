@@ -1,0 +1,5 @@
+MIPS generation flag detected
+Type Warning on line 107: conversion from 'int' to 'char' may alter value
+Type Warning on line 128: conversion from 'int' to 'char' may alter value
+IR: testreturn/6_switch_cases.ir (293 instructions)
+MIPS assembly generated: output.s

@@ -1,0 +1,341 @@
+rm -rf obj ir_generator
+cd obj && bison -d -v -Wno-conflicts-sr -Wno-conflicts-rr ../src/parser.y
+flex  -o obj/lex.yy.c src/lexer.l
+g++ -Wall -Isrc -std=c++11 -Wno-unused-variable -Wno-switch -Wno-address -Wno-unused-function -Wno-sign-compare -Wno-format-overflow -c obj/lex.yy.c -o obj/lex.yy.o
+g++ -Wall -Isrc -std=c++11 -Wno-unused-variable -Wno-switch -Wno-address -Wno-unused-function -Wno-sign-compare -Wno-format-overflow -c obj/parser.tab.c -o obj/parser.tab.o
+g++ -Wall -Isrc -std=c++11 -Wno-unused-variable -Wno-switch -Wno-address -Wno-unused-function -Wno-sign-compare -Wno-format-overflow -c src/main.cpp -o obj/main.o
+g++ -Wall -Isrc -std=c++11 -Wno-unused-variable -Wno-switch -Wno-address -Wno-unused-function -Wno-sign-compare -Wno-format-overflow -c src/ast.cpp -o obj/ast.o
+g++ -Wall -Isrc -std=c++11 -Wno-unused-variable -Wno-switch -Wno-address -Wno-unused-function -Wno-sign-compare -Wno-format-overflow -c src/symbol_table.cpp -o obj/symbol_table.o
+g++ -Wall -Isrc -std=c++11 -Wno-unused-variable -Wno-switch -Wno-address -Wno-unused-function -Wno-sign-compare -Wno-format-overflow -c src/ir_context.cpp -o obj/ir_context.o
+g++ -Wall -Isrc -std=c++11 -Wno-unused-variable -Wno-switch -Wno-address -Wno-unused-function -Wno-sign-compare -Wno-format-overflow -c src/ir_generator.cpp -o obj/ir_generator.o
+g++ -Wall -Isrc -std=c++11 -Wno-unused-variable -Wno-switch -Wno-address -Wno-unused-function -Wno-sign-compare -Wno-format-overflow -c src/basic_block.cpp -o obj/basic_block.o
+g++ -Wall -Isrc -std=c++11 -Wno-unused-variable -Wno-switch -Wno-address -Wno-unused-function -Wno-sign-compare -Wno-format-overflow -c src/mips_codegen.cpp -o obj/mips_codegen.o
+g++ -Wall -Isrc -std=c++11 -Wno-unused-variable -Wno-switch -Wno-address -Wno-unused-function -Wno-sign-compare -Wno-format-overflow -o ir_generator obj/lex.yy.o obj/parser.tab.o obj/main.o obj/ast.o obj/symbol_table.o obj/ir_context.o obj/ir_generator.o obj/basic_block.o obj/mips_codegen.o -lfl
+[0;34m============================================[0m
+[0;34mTesting Return Values with SPIM[0m
+[0;34m============================================[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 1_arithmetic_logical[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/1_arithmetic_logical.ir (379 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/1_arithmetic_logical.s
+Running with SPIM (timeout: 10s)...
+[0;32m✓ Test PASSED (return value: 0)[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 2_if_else[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/2_if_else.ir (183 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/2_if_else.s
+Running with SPIM (timeout: 10s)...
+[0;32m✓ Test PASSED (return value: 0)[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 3_for_loop[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/3_for_loop.ir (238 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/3_for_loop.s
+Running with SPIM (timeout: 10s)...
+[0;32m✓ Test PASSED (return value: 0)[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 4_while_loop[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/4_while_loop.ir (180 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/4_while_loop.s
+Running with SPIM (timeout: 10s)...
+[0;32m✓ Test PASSED (return value: 0)[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 5_do_while_loop[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/5_do_while_loop.ir (180 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/5_do_while_loop.s
+Running with SPIM (timeout: 10s)...
+[0;32m✓ Test PASSED (return value: 0)[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 6_switch_cases[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+Type Warning on line 107: conversion from 'int' to 'char' may alter value
+Type Warning on line 128: conversion from 'int' to 'char' may alter value
+Semantic Error on line 210: duplicate case value '1' in switch statement
+IR: ./testreturn/6_switch_cases.ir (293 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/6_switch_cases.s
+Running with SPIM (timeout: 10s)...
+[0;31m✗ Test FAILED (return value: 165, expected: 0)[0m
+  → Test failed at or near line 165
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 7_arrays[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/7_arrays.ir (182 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/7_arrays.s
+Running with SPIM (timeout: 10s)...
+[0;31m✗ Test FAILED (return value: 45, expected: 0)[0m
+  → Test failed at or near line 45
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 8_pointers[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/8_pointers.ir (167 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/8_pointers.s
+Running with SPIM (timeout: 10s)...
+[0;31m✗ SPIM runtime error[0m
+SPIM output:
+SPIM Version 8.0 of January 8, 2010
+Copyright 1990-2010, James R. Larus.
+All Rights Reserved.
+See the file README for a full copyright notice.
+Loaded: /usr/lib/spim/exceptions.s
+Exception occurred at PC=0x00400184
+  Bad address in data/stack read: 0x00000014
+  Exception 7  [Bad data address]  occurred and ignored
+37
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 9_structures[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/9_structures.ir (205 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/9_structures.s
+Running with SPIM (timeout: 10s)...
+[0;32m✓ Test PASSED (return value: 0)[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 10_printf_scanf[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/10_printf_scanf.ir (66 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/10_printf_scanf.s
+Running with SPIM (timeout: 10s)...
+[0;32m✓ Test PASSED (return value: 0)[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 11_functions_recursive_functions[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/11_functions_recursive_functions.ir (214 instructions)
+Warning: Variable 'n' not found in activation record
+Warning: Variable 'n' not found in activation record
+Warning: Variable 'n' not found in activation record
+Warning: Variable 'n' not found in activation record
+Warning: Variable 'n' not found in activation record
+Warning: Variable 'b' not found in activation record
+Warning: Variable 'c' not found in activation record
+Warning: Variable 'exp' not found in activation record
+Warning: Variable 'base' not found in activation record
+MIPS assembly generated: output.s
+Created: ./testreturn/11_functions_recursive_functions.s
+Running with SPIM (timeout: 10s)...
+[0;31m✗ Test FAILED (return value: 55, expected: 0)[0m
+  → Test failed at or near line 55
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 12_goto_break_continue[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/12_goto_break_continue.ir (328 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/12_goto_break_continue.s
+Running with SPIM (timeout: 10s)...
+[0;32m✓ Test PASSED (return value: 0)[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 13_static_keywords[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/13_static_keywords.ir (88 instructions)
+Warning: Variable 'main.main_static' not found in activation record
+MIPS assembly generated: output.s
+Created: ./testreturn/13_static_keywords.s
+Running with SPIM (timeout: 10s)...
+[0;31m✗ Test FAILED (return value: 30, expected: 0)[0m
+  → Test failed at or near line 30
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 14_command_line_input[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/14_command_line_input.ir (75 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/14_command_line_input.s
+Running with SPIM (timeout: 10s)...
+[0;31m✗ Test FAILED (return value: 52, expected: 0)[0m
+  → Test failed at or near line 52
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 15_typedef[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+Type Error on line 30: invalid operands to binary '!=' (have 'Integer' and 'int')
+Type Error on line 35: invalid operands to binary '!=' (have 'MyInt' and 'int')
+Type Error on line 40: invalid operands to binary '!=' (have 'MyChar' and 'int')
+Type Error on line 55: invalid operands to binary '+' (have 'Integer' and 'MyInt')
+Type Error on line 91: invalid operands to binary '!=' (have 'Integer' and 'int')
+Type Error on line 102: invalid operands to binary '+' (have 'Integer' and 'int')
+Type Error on line 103: invalid operands to binary '!=' (have 'MyInt' and 'int')
+=== PARSING FAILED ===
+Total errors: 7
+[0;31m✗ Code generation failed[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 16_reference[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/16_reference.ir (155 instructions)
+Warning: Variable 'arr' not found in activation record
+Warning: Variable 'arr' not found in activation record
+MIPS assembly generated: output.s
+Created: ./testreturn/16_reference.s
+Running with SPIM (timeout: 10s)...
+[0;31m✗ SPIM runtime error[0m
+SPIM output:
+Exception occurred at PC=0x0040003c
+  Bad address in data/stack read: 0x00000000
+  Exception 7  [Bad data address]  occurred and ignored
+Exception occurred at PC=0x00400040
+  Unaligned address in store: 0x0000000a
+  Exception 5  [Address error in store]  occurred and ignored
+Exception occurred at PC=0x00400044
+  Bad address in data/stack read: 0x00000000
+  Exception 7  [Bad data address]  occurred and ignored
+38
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 17_enum_union[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+Type Error on line 22: incompatible types when assigning to type 'enum' from type 'int'
+Type Error on line 23: invalid operands to binary '!=' (have 'enum' and 'int')
+Type Error on line 28: incompatible types when assigning to type 'enum' from type 'int'
+Type Error on line 29: invalid operands to binary '!=' (have 'enum' and 'int')
+Type Error on line 34: incompatible types when assigning to type 'enum' from type 'int'
+Type Error on line 35: invalid operands to binary '!=' (have 'enum' and 'int')
+Type Error on line 40: incompatible types when assigning to type 'enum' from type 'int'
+Type Error on line 58: incompatible types when assigning to type 'enum' from type 'int'
+Type Error on line 76: incompatible types when assigning to type 'enum' from type 'int'
+Type Error on line 77: invalid operands to binary '!=' (have 'enum' and 'int')
+Type Error on line 82: incompatible types when assigning to type 'enum' from type 'int'
+Type Error on line 83: invalid operands to binary '!=' (have 'enum' and 'int')
+Type Error on line 88: incompatible types when assigning to type 'enum' from type 'int'
+Type Error on line 89: invalid operands to binary '!=' (have 'enum' and 'int')
+Type Warning on line 100: conversion from 'int' to 'char' may alter value
+Type Error on line 112: incompatible types when assigning to type 'enum' from type 'int'
+Type Error on line 113: invalid operands to binary '==' (have 'enum' and 'int')
+Type Error on line 118: incompatible types when assigning to type 'enum' from type 'int'
+Type Error on line 119: invalid operands to binary '+' (have 'enum' and 'int')
+Type Error on line 131: incompatible types when assigning to type 'enum' from type 'int'
+=== PARSING FAILED ===
+Total errors: 19
+[0;31m✗ Code generation failed[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 18_until_loop[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+IR: ./testreturn/18_until_loop.ir (180 instructions)
+MIPS assembly generated: output.s
+Created: ./testreturn/18_until_loop.s
+Running with SPIM (timeout: 10s)...
+[0;31m✗ TIMEOUT (exceeded 10s)[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 20_typedef_simple[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+Type Error on line 19: invalid operands to binary '!=' (have 'Integer' and 'int')
+Type Error on line 24: invalid operands to binary '!=' (have 'Integer' and 'int')
+Type Error on line 29: invalid operands to binary '+' (have 'Integer' and 'Integer')
+Type Error on line 52: invalid operands to binary '!=' (have 'Integer' and 'int')
+Type Error on line 63: invalid operands to binary '+' (have 'Integer' and 'Integer')
+=== PARSING FAILED ===
+Total errors: 5
+[0;31m✗ Code generation failed[0m
+
+[1;33m--------------------------------------------[0m
+[1;33mTesting: 21_typedef_no_printf[0m
+[1;33m--------------------------------------------[0m
+Generating MIPS assembly...
+MIPS generation flag detected
+Type Error on line 24: invalid operands to binary '!=' (have 'MyInt' and 'int')
+Type Error on line 29: invalid operands to binary '!=' (have 'MyChar' and 'int')
+Type Error on line 51: invalid operands to binary '!=' (have 'MyInt' and 'int')
+Type Error on line 68: invalid operands to binary '+' (have 'MyInt' and 'int')
+Type Error on line 74: invalid operands to binary '+' (have 'MyChar' and 'int')
+=== PARSING FAILED ===
+Total errors: 5
+[0;31m✗ Code generation failed[0m
+
+[0;34m============================================[0m
+[0;34mTEST SUMMARY[0m
+[0;34m============================================[0m
+Total Tests:  20
+[0;32mPassed:       8[0m
+[0;31mFailed:       8[0m
+[1;33mErrors:       4[0m
+
+[0;32mPassed Tests:[0m
+  [0;32m✓[0m 1_arithmetic_logical
+  [0;32m✓[0m 2_if_else
+  [0;32m✓[0m 3_for_loop
+  [0;32m✓[0m 4_while_loop
+  [0;32m✓[0m 5_do_while_loop
+  [0;32m✓[0m 9_structures
+  [0;32m✓[0m 10_printf_scanf
+  [0;32m✓[0m 12_goto_break_continue
+
+[0;31mFailed Tests:[0m
+  [0;31m✗[0m 6_switch_cases (returned 165)
+  [0;31m✗[0m 7_arrays (returned 45)
+  [0;31m✗[0m 8_pointers (runtime error)
+  [0;31m✗[0m 11_functions_recursive_functions (returned 55)
+  [0;31m✗[0m 13_static_keywords (returned 30)
+  [0;31m✗[0m 14_command_line_input (returned 52)
+  [0;31m✗[0m 16_reference (runtime error)
+  [0;31m✗[0m 18_until_loop (timeout)
+
+[1;33mError Tests:[0m
+  [1;33m![0m 15_typedef (code generation failed)
+  [1;33m![0m 17_enum_union (code generation failed)
+  [1;33m![0m 20_typedef_simple (code generation failed)
+  [1;33m![0m 21_typedef_no_printf (code generation failed)
+

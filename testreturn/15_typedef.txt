@@ -1,0 +1,108 @@
+// Test file for typedef
+// Returns 0 on success, or line number on failure
+
+typedef int Integer;
+typedef int MyInt;
+typedef char MyChar;
+
+typedef struct {
+    int x;
+    int y;
+} Point;
+
+typedef struct {
+    int width;
+    int height;
+} Rectangle;
+
+int main() {
+    Integer num = 100;
+    MyInt value = 42;
+    MyChar ch = 65; // 'A'
+    
+    Point p;
+    Point p2;
+    Rectangle rect;
+    
+    int result = 0;
+    
+    // Test 1: Basic typedef integer
+    if (num != 100) {
+        return 30;
+    }
+    
+    // Test 2: Another typedef integer
+    if (value != 42) {
+        return 35;
+    }
+    
+    // Test 3: Typedef char
+    if (ch != 65) {
+        return 40;
+    }
+    
+    // Test 4: Typedef struct - Point
+    p.x = 10;
+    p.y = 20;
+    if (p.x != 10) {
+        return 47;
+    }
+    if (p.y != 20) {
+        return 50;
+    }
+    
+    // Test 5: Arithmetic with typedef variables
+    result = num + value;
+    if (result != 142) {
+        return 56;
+    }
+    
+    // Test 6: Another Point instance
+    p2.x = 5;
+    p2.y = 15;
+    if (p2.x != 5) {
+        return 63;
+    }
+    
+    // Test 7: Typedef Rectangle
+    rect.width = 100;
+    rect.height = 50;
+    if (rect.width != 100) {
+        return 70;
+    }
+    if (rect.height != 50) {
+        return 73;
+    }
+    
+    // Test 8: Calculate area
+    result = rect.width * rect.height;
+    if (result != 5000) {
+        return 79;
+    }
+    
+    // Test 9: Point arithmetic
+    result = p.x + p.y;
+    if (result != 30) {
+        return 85;
+    }
+    
+    // Test 10: Modify typedef variable
+    num = 200;
+    if (num != 200) {
+        return 91;
+    }
+    
+    // Test 11: Struct member from typedef
+    p.x = p2.x + p2.y;
+    if (p.x != 20) {
+        return 97;
+    }
+    
+    // Test 12: Complex calculation with typedef
+    value = num + p.x;
+    if (value != 220) {
+        return 103;
+    }
+    
+    return 0; // All tests passed
+}
