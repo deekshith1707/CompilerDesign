@@ -502,16 +502,28 @@ int getArrayElementInfo(const char* arrayName, bool* isCharArray) {
     // Search symbol table for the array
     for (int i = 0; i < symCount; i++) {
         if (strcmp(symtab[i].name, arrayName) == 0) {
-            // Check if it's a char array
-            if (strstr(symtab[i].type, "char") != NULL) {
+            // CRITICAL FIX: For arrays, distinguish between:
+            // - char arr[] : array of chars, element size = 1 byte
+            // - char* arr[] : array of char pointers, element size = 4 bytes
+            // Check if it's an ARRAY of pointers (ptr_level > 0 && is_array)
+            if (symtab[i].is_array && symtab[i].ptr_level > 0) {
+                // Array of pointers: char* arr[], int* arr[], etc.
+                // Each element is a pointer (4 bytes in MIPS32)
+                *isCharArray = false;
+                return 4;
+            }
+            
+            // Check if it's a pure char array (not char*)
+            if (strstr(symtab[i].type, "char") != NULL && symtab[i].ptr_level == 0) {
                 *isCharArray = true;
                 return 1;  // char elements are 1 byte
             }
-            // Check for pointer types (int*, char*, etc.)
-            if (strstr(symtab[i].type, "*") != NULL) {
+            
+            // Check for pointer types (int*, char*, etc.) that are NOT arrays
+            if (strstr(symtab[i].type, "*") != NULL || symtab[i].ptr_level > 0) {
                 // In MIPS32, all pointers are 4 bytes (32-bit addresses)
                 // For pointer arithmetic (ptr + 1), we need the size of the pointed-to type
-                if (strstr(symtab[i].type, "char") != NULL) {
+                if (strstr(symtab[i].type, "char") != NULL && symtab[i].ptr_level == 1) {
                     return 1;  // char* pointer arithmetic: ptr+1 adds 1 byte
                 }
                 return 4;  // int*, float*, other* pointer arithmetic: ptr+1 adds 4 bytes
@@ -922,7 +934,8 @@ bool isGlobalVariable(MIPSCodeGenerator* codegen, const char* varName) {
     
     // Also check if variable name contains '.' which indicates static local variable
     // (e.g., "static_function.local_static", "main.main_static")
-    if (strchr(varName, '.') != NULL) {
+    // BUT: Make sure it's not a floating point constant (e.g., "10.5f", "3.14")
+    if (strchr(varName, '.') != NULL && !isConstantValue(varName)) {
         return true;
     }
     
@@ -975,6 +988,11 @@ void spillRegister(MIPSCodeGenerator* codegen, int regNum) {
     
     for (int i = 0; i < regDesc->varCount; i++) {
         const char* varName = regDesc->varNames[i];
+        
+        // CRITICAL: Skip constants - they should never be stored back to memory
+        if (isConstantValue(varName)) {
+            continue;
+        }
         
         // Find address descriptor
         int addrIdx = findAddressDescriptor(codegen, varName);
@@ -1201,7 +1219,12 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
         for (int r = REG_T0; r <= REG_T9; r++) {
             if (codegen->regDescriptors[r].varCount == 0) {
                 loadVariable(codegen, varName, r);
-                // Don't update descriptors for constants - they're temporary values
+                // CRITICAL FIX: Must update descriptors to prevent register reallocation during same instruction
+                // Constants need temporary tracking within an instruction to avoid clobbering
+                // Use a special marker (constant itself) to mark register as busy
+                // BUT: Do NOT mark as dirty - constants should never be stored back to memory!
+                updateDescriptors(codegen, r, varName);
+                codegen->regDescriptors[r].isDirty = false;  // Constants are read-only
                 return r;
             }
         }
@@ -1239,7 +1262,10 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
         spillRegister(codegen, victimReg);
         clearRegisterDescriptor(codegen, victimReg);  // CRITICAL: Clear before loading constant!
         loadVariable(codegen, varName, victimReg);
-        // Don't update descriptors for constants - they're temporary values that don't need tracking
+        // Update descriptors to mark register as busy with this constant
+        // BUT: Do NOT mark as dirty - constants should never be stored back!
+        updateDescriptors(codegen, victimReg, varName);
+        codegen->regDescriptors[victimReg].isDirty = false;  // Constants are read-only
         return victimReg;
     }
     
@@ -1283,6 +1309,16 @@ int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
                 shouldLoad = true;
             } else if (isGlobalVariable(codegen, varName)) {
                 shouldLoad = true;
+            } else if (addrIdx < 0 && codegen->currentFunction != NULL) {
+                // No address descriptor - check if this is a declared local variable or parameter
+                // If it has a stack location, we should load from memory (might have been written by scanf/etc)
+                for (int v = 0; v < codegen->currentFunction->varCount; v++) {
+                    if (strcmp(codegen->currentFunction->variables[v].varName, varName) == 0) {
+                        // Found in activation record - it's a real variable with storage, load it
+                        shouldLoad = true;
+                        break;
+                    }
+                }
             } else if (codegen->currentFunction != NULL) {
                 // Check if this is a parameter - parameters are saved in prologue
                 char params[16][128];
@@ -1682,6 +1718,66 @@ void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
         strncpy(indexStr, bracket + 1, indexLen);
         indexStr[indexLen] = '\0';
         
+        // Check if arrayName is a pointer variable (not an array)
+        bool isPointer = isPointerVariable(arrayName);
+        
+        if (isPointer) {
+            // Pointer indexing: p[i] = *(p + i)
+            // Load pointer value (address)
+            int ptrReg = getReg(codegen, arrayName, irIndex);
+            int resultReg = getReg(codegen, quad->result, irIndex);
+            
+            // Determine element size
+            bool isCharArray = false;
+            int elementSize = getArrayElementInfo(arrayName, &isCharArray);
+            
+            if (isConstantValue(indexStr)) {
+                // Constant index: add offset directly
+                int index = atoi(indexStr);
+                int offset = index * elementSize;
+                if (isCharArray) {
+                    sprintf(instr, "    lb %s, %d(%s)", getRegisterName(resultReg), offset, getRegisterName(ptrReg));
+                } else {
+                    sprintf(instr, "    lw %s, %d(%s)", getRegisterName(resultReg), offset, getRegisterName(ptrReg));
+                }
+                emitMIPS(codegen, instr);
+            } else {
+                // Variable index: calculate offset
+                int indexReg = getReg(codegen, indexStr, irIndex);
+                if (elementSize == 4) {
+                    sprintf(instr, "    sll $t8, %s, 2", getRegisterName(indexReg));
+                } else if (elementSize == 1) {
+                    sprintf(instr, "    move $t8, %s", getRegisterName(indexReg));
+                } else {
+                    sprintf(instr, "    li $t9, %d", elementSize);
+                    emitMIPS(codegen, instr);
+                    sprintf(instr, "    mul $t8, %s, $t9", getRegisterName(indexReg));
+                }
+                emitMIPS(codegen, instr);
+                
+                sprintf(instr, "    add $t8, $t8, %s", getRegisterName(ptrReg));
+                emitMIPS(codegen, instr);
+                
+                if (isCharArray) {
+                    sprintf(instr, "    lb %s, 0($t8)", getRegisterName(resultReg));
+                } else {
+                    sprintf(instr, "    lw %s, 0($t8)", getRegisterName(resultReg));
+                }
+                emitMIPS(codegen, instr);
+            }
+            
+            // Update descriptors and store
+            updateDescriptors(codegen, resultReg, quad->result);
+            codegen->regDescriptors[resultReg].isDirty = false;
+            storeVariable(codegen, quad->result, resultReg);
+            int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+            if (addrIdx >= 0) {
+                codegen->addrDescriptors[addrIdx].inMemory = true;
+            }
+            return;
+        }
+        
+        // Array access (not pointer)
         // Get array base offset
         char arrayLocation[128];
         getMemoryLocation(codegen, arrayName, arrayLocation);
@@ -1911,6 +2007,34 @@ void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
         return;
     }
     
+    // Check if arg1 is a function name (for function pointer assignment: func = functionName)
+    extern Symbol* lookupSymbol(const char* name);
+    Symbol* funcSym = lookupSymbol(quad->arg1);
+    if (funcSym && funcSym->is_function) {
+        // Load address of function label into result
+        int regDest = getReg(codegen, quad->result, irIndex);
+        char funcLabel[128];
+        // Add underscore prefix to avoid conflicts (except for main)
+        if (strcmp(quad->arg1, "main") == 0) {
+            sprintf(funcLabel, "_main");
+        } else {
+            sprintf(funcLabel, "_%s", quad->arg1);
+        }
+        sprintf(instr, "    la %s, %s    # %s = &%s", 
+                getRegisterName(regDest), funcLabel, quad->result, quad->arg1);
+        emitMIPS(codegen, instr);
+        
+        // Store and update descriptors
+        storeVariable(codegen, quad->result, regDest);
+        int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+        if (addrIdx >= 0) {
+            codegen->addrDescriptors[addrIdx].inMemory = true;
+            codegen->addrDescriptors[addrIdx].inRegister = regDest;
+        }
+        updateDescriptors(codegen, regDest, quad->result);
+        return;
+    }
+    
     // Variable assignment: result = variable
     // Get register for arg1 (source)
     int regSrc = getReg(codegen, quad->arg1, irIndex);
@@ -1967,7 +2091,26 @@ void sanitizeLabelName(const char* input, char* output) {
     for (int i = 0; input[i] != '\0' && i < 127; i++) {
         char c = input[i];
         // Replace single quotes, spaces, and other special chars with underscore
-        if (c == '\'' || c == ' ' || c == '"' || c == '.' || c == ',') {
+        // For characters in quotes like 'a' or '-', convert to ASCII value
+        if (c == '\'') {
+            // Skip quote, get the character inside, convert to ASCII
+            if (input[i+1] != '\'' && input[i+1] != '\0') {
+                i++; // Move to char inside quote
+                // Convert character to ASCII decimal representation
+                int ascii = (int)(unsigned char)input[i];
+                char asciiStr[10];
+                sprintf(asciiStr, "%d", ascii);
+                for (int k = 0; asciiStr[k] != '\0'; k++) {
+                    output[j++] = asciiStr[k];
+                }
+                // Skip closing quote if present
+                if (input[i+1] == '\'') {
+                    i++;
+                }
+            } else {
+                output[j++] = '_';
+            }
+        } else if (c == ' ' || c == '"' || c == '.' || c == ',' || c == '-' || c == '+' || c == '*' || c == '/') {
             output[j++] = '_';
         } else {
             output[j++] = c;
@@ -2782,6 +2925,24 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
             emitMIPS(codegen, instr);
         }
         
+        // If call has a result, store return value from $v0
+        if (strlen(quad->result) > 0 && strcmp(quad->result, "") != 0) {
+            int resultReg = getReg(codegen, quad->result, irIndex);
+            sprintf(instr, "    move %s, $v0", getRegisterName(resultReg));
+            emitMIPS(codegen, instr);
+            
+            // Update descriptors
+            updateDescriptors(codegen, resultReg, quad->result);
+            codegen->regDescriptors[resultReg].isDirty = false;
+            
+            // Store to memory
+            storeVariable(codegen, quad->result, resultReg);
+            int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+            if (addrIdx >= 0) {
+                codegen->addrDescriptors[addrIdx].inMemory = true;
+            }
+        }
+        
         // NOTE: No parameter cleanup needed - scanf params are NOT pushed to stack
         // (translateParam skips stack ops for printf/scanf)
         
@@ -2791,9 +2952,10 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
         for (int r = REG_T0; r <= REG_T9; r++) {
             clearRegisterDescriptor(codegen, r);
         }
-        // Ensure all address descriptors show variables are NOT in registers
+        // Ensure all address descriptors show variables are NOT in registers but ARE in memory
         for (int i = 0; i < codegen->addrDescCount; i++) {
             codegen->addrDescriptors[i].inRegister = -1;
+            codegen->addrDescriptors[i].inMemory = true;  // Variables modified by scanf are in memory
         }
     }
     else {
@@ -2829,6 +2991,15 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
             
             // Update descriptors
             updateDescriptors(codegen, resultReg, quad->result);
+            codegen->regDescriptors[resultReg].isDirty = false;  // Return value already stored
+            
+            // CRITICAL FIX: Store return value to memory so it can be loaded later
+            // Without this, subsequent loads (e.g., for printf arguments) get garbage
+            storeVariable(codegen, quad->result, resultReg);
+            int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+            if (addrIdx >= 0) {
+                codegen->addrDescriptors[addrIdx].inMemory = true;
+            }
         }
     }
     
@@ -3030,6 +3201,14 @@ void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         emitMIPS(codegen, instr);
         
         updateDescriptors(codegen, resultReg, resultVar);
+        codegen->regDescriptors[resultReg].isDirty = false;
+        
+        // Store to memory for reloadability
+        storeVariable(codegen, resultVar, resultReg);
+        int addrIdx = findOrCreateAddrDesc(codegen, resultVar);
+        if (addrIdx >= 0) {
+            codegen->addrDescriptors[addrIdx].inMemory = true;
+        }
         return;
     }
     
@@ -3308,6 +3487,14 @@ void translateAddr(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
         emitMIPS(codegen, instr);
         
         updateDescriptors(codegen, resultReg, resultVar);
+        codegen->regDescriptors[resultReg].isDirty = false;
+        
+        // Store to memory for reloadability
+        storeVariable(codegen, resultVar, resultReg);
+        int addrIdx = findOrCreateAddrDesc(codegen, resultVar);
+        if (addrIdx >= 0) {
+            codegen->addrDescriptors[addrIdx].inMemory = true;
+        }
     } else {
         // Global variable - load address
         int resultReg = getReg(codegen, resultVar, irIndex);
@@ -3315,6 +3502,14 @@ void translateAddr(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
         emitMIPS(codegen, instr);
         
         updateDescriptors(codegen, resultReg, resultVar);
+        codegen->regDescriptors[resultReg].isDirty = false;
+        
+        // Store to memory for reloadability
+        storeVariable(codegen, resultVar, resultReg);
+        int addrIdx = findOrCreateAddrDesc(codegen, resultVar);
+        if (addrIdx >= 0) {
+            codegen->addrDescriptors[addrIdx].inMemory = true;
+        }
     }
 }
 
@@ -3455,6 +3650,14 @@ void translateDeref(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     emitMIPS(codegen, instr);
     
     updateDescriptors(codegen, resultReg, resultVar);
+    codegen->regDescriptors[resultReg].isDirty = true;
+    
+    // Store result to memory for reloadability
+    storeVariable(codegen, resultVar, resultReg);
+    int addrIdx = findOrCreateAddrDesc(codegen, resultVar);
+    if (addrIdx >= 0) {
+        codegen->addrDescriptors[addrIdx].inMemory = true;
+    }
 }
 
 /**
@@ -3539,6 +3742,14 @@ void translateLoadOffset(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
     emitMIPS(codegen, instr);
     
     updateDescriptors(codegen, resultReg, resultVar);
+    codegen->regDescriptors[resultReg].isDirty = false;
+    
+    // Store result to memory for reloadability
+    storeVariable(codegen, resultVar, resultReg);
+    int addrIdx = findOrCreateAddrDesc(codegen, resultVar);
+    if (addrIdx >= 0) {
+        codegen->addrDescriptors[addrIdx].inMemory = true;
+    }
 }
 
 /**
@@ -3938,6 +4149,40 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
     else if (strcmp(quad->op, "CALL") == 0 || strcmp(quad->op, "call") == 0) {
         translateCall(codegen, quad, irIndex);
     }
+    // INDIRECT_CALL - call through a function pointer
+    else if (strcmp(quad->op, "INDIRECT_CALL") == 0) {
+        // Format: INDIRECT_CALL func_var <param_count> [result]
+        char instr[256];
+
+        // The function variable name is in arg1
+        const char* funcVar = quad->arg1;
+
+        // Number of params is in arg2 (but translateParam already pushed them)
+        int paramCount = atoi(quad->arg2);
+
+        // Load function pointer value into a register
+        int regFunc = getReg(codegen, funcVar, irIndex);
+
+        // Jump-and-link-register to the function pointer
+        sprintf(instr, "    jalr %s    # indirect call via %s", getRegisterName(regFunc), funcVar);
+        emitMIPS(codegen, instr);
+
+        // If the indirect call has a result (quad->result non-empty), move $v0 into result
+        if (quad->result && quad->result[0] != '\0') {
+            int resultReg = getReg(codegen, quad->result, irIndex);
+            sprintf(instr, "    move %s, $v0    # move return value", getRegisterName(resultReg));
+            emitMIPS(codegen, instr);
+
+            // Store and update descriptors
+            storeVariable(codegen, quad->result, resultReg);
+            updateDescriptors(codegen, resultReg, quad->result);
+            codegen->regDescriptors[resultReg].isDirty = false;
+            int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+            if (addrIdx >= 0) {
+                codegen->addrDescriptors[addrIdx].inMemory = true;
+            }
+        }
+    }
     // RETURN (Phase 3 - improved version)
     else if (strcmp(quad->op, "RETURN") == 0 || strcmp(quad->op, "return") == 0) {
         translateReturn(codegen, quad, irIndex);
@@ -3957,6 +4202,69 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
     // ARRAY_ADDR - address of array element: &arr[i]
     else if (strcmp(quad->op, "ARRAY_ADDR") == 0) {
         translateArrayAddr(codegen, quad, irIndex);
+    }
+    // LOAD - load from reference: LOAD [ptr] result
+    else if (strncmp(quad->op, "LOAD", 4) == 0) {
+        // LOAD [x] t0 means t0 = *x (load value at address in x)
+        // arg1 contains "[x]" - extract the variable name
+        char ptrVar[128];
+        if (quad->arg1 && quad->arg1[0] == '[') {
+            // Extract variable name from "[x]"
+            int len = strlen(quad->arg1);
+            strncpy(ptrVar, quad->arg1 + 1, len - 2);
+            ptrVar[len - 2] = '\0';
+        } else {
+            strcpy(ptrVar, quad->arg1 ? quad->arg1 : "");
+        }
+        
+        // Get register holding the pointer address
+        int regPtr = getReg(codegen, ptrVar, irIndex);
+        
+        // Get register for result
+        int regResult = getReg(codegen, quad->result, irIndex);
+        
+        // Load from address
+        char instr[256];
+        sprintf(instr, "    lw %s, 0(%s)    # %s = *%s", 
+                getRegisterName(regResult), getRegisterName(regPtr), 
+                quad->result, ptrVar);
+        emitMIPS(codegen, instr);
+        
+        // Store and update descriptors
+        storeVariable(codegen, quad->result, regResult);
+        updateDescriptors(codegen, regResult, quad->result);
+        int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+        if (addrIdx >= 0) {
+            codegen->addrDescriptors[addrIdx].inMemory = true;
+            codegen->addrDescriptors[addrIdx].inRegister = regResult;
+        }
+    }
+    // STORE - store to reference: STORE value [ptr]
+    else if (strncmp(quad->op, "STORE", 5) == 0) {
+        // STORE t1 [x] means *x = t1 (store value to address in x)
+        // arg2 contains "[x]" - extract the variable name
+        char ptrVar[128];
+        if (quad->arg2 && quad->arg2[0] == '[') {
+            // Extract variable name from "[x]"
+            int len = strlen(quad->arg2);
+            strncpy(ptrVar, quad->arg2 + 1, len - 2);
+            ptrVar[len - 2] = '\0';
+        } else {
+            strcpy(ptrVar, quad->arg2 ? quad->arg2 : "");
+        }
+        
+        // Get register holding the value to store
+        int regValue = getReg(codegen, quad->arg1, irIndex);
+        
+        // Get register holding the pointer address
+        int regPtr = getReg(codegen, ptrVar, irIndex);
+        
+        // Store to address
+        char instr[256];
+        sprintf(instr, "    sw %s, 0(%s)    # *%s = %s", 
+                getRegisterName(regValue), getRegisterName(regPtr), 
+                ptrVar, quad->arg1);
+        emitMIPS(codegen, instr);
     }
     // DEREF - dereference operator (Phase 3)
     else if (strcmp(quad->op, "DEREF") == 0 || strcmp(quad->op, "*") == 0) {

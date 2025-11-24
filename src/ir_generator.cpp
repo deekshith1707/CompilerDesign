@@ -2401,11 +2401,27 @@ char* generate_ir(TreeNode* node) {
                                  strstr(sym->type, "[") == NULL && strstr(rhs->dataType, "[") == NULL) {
                             if (resolved_type) free(resolved_type);
                             rhs_result = convertType(rhs_result, rhs->dataType, sym->type);
-                            emit("ASSIGN", rhs_result, "", lhs_name);
+                            // Check if this is a reference variable initialization
+                            if (sym && sym->is_reference) {
+                                // Reference initialization: store ADDRESS of rhs into the reference
+                                char* addr_temp = newTemp();
+                                emit("ADDR", rhs_result, "", addr_temp);
+                                emit("ASSIGN", addr_temp, "", lhs_name);
+                            } else {
+                                emit("ASSIGN", rhs_result, "", lhs_name);
+                            }
                         }
                         else {
                             if (resolved_type) free(resolved_type);
-                            emit("ASSIGN", rhs_result, "", lhs_name);
+                            // Check if this is a reference variable initialization
+                            if (sym && sym->is_reference) {
+                                // Reference initialization: store ADDRESS of rhs into the reference
+                                char* addr_temp = newTemp();
+                                emit("ADDR", rhs_result, "", addr_temp);
+                                emit("ASSIGN", addr_temp, "", lhs_name);
+                            } else {
+                                emit("ASSIGN", rhs_result, "", lhs_name);
+                            }
                         }
                     }
                     

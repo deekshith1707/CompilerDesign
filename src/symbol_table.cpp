@@ -2147,6 +2147,30 @@ int isNullPointer(TreeNode* expr) {
 
 int canImplicitConvert(const char* from_type, const char* to_type) {
     if (strcmp(from_type, to_type) == 0) return 1;
+    
+    // REFERENCE HANDLING: If to_type is a reference (contains '&'), 
+    // we can pass a variable of the base type
+    // Example: passing 'int' to 'int&' parameter is valid
+    if (strstr(to_type, "&") != NULL) {
+        // Strip the '&' from to_type to get base type
+        char* base_type = strdup(to_type);
+        char* amp = strstr(base_type, "&");
+        if (amp) {
+            // Remove '&' and any trailing whitespace
+            *amp = '\0';
+            // Remove trailing whitespace
+            int len = strlen(base_type);
+            while (len > 0 && (base_type[len-1] == ' ' || base_type[len-1] == '\t')) {
+                base_type[--len] = '\0';
+            }
+        }
+        
+        // Check if from_type matches the base type
+        int result = (strcmp(from_type, base_type) == 0);
+        free(base_type);
+        if (result) return 1;
+    }
+    
     if (isArithmeticType(from_type) && isArithmeticType(to_type)) return 1;
     if (strstr(from_type, "*") && strstr(to_type, "*")) return isPointerCompatible(from_type, to_type);
     return 0;

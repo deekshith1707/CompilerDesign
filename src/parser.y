@@ -1394,8 +1394,8 @@ init_declarator:
                 }
             }
             
-            // Type check initialization: pointer = non-zero integer (error) - but not for function pointers
-            else if (!isFuncPtr && ptrLevel > 0 && $3->dataType && !isNullPointer($3)) {
+            // Type check initialization: pointer = non-zero integer (error) - but not for function pointers or references
+            else if (!isFuncPtr && !isRef && ptrLevel > 0 && $3->dataType && !isNullPointer($3)) {
                 char* init_decayed = decayArrayToPointer($3->dataType);
                 // If initializer is not a pointer and not NULL, it's an error
                 if (!strstr(init_decayed, "*") && !isArithmeticType(init_decayed)) {
@@ -2527,6 +2527,10 @@ postfix_expression:
         $$ = createNode(NODE_POSTFIX_EXPRESSION, "()");
         addChild($$, $1);
         $$->dataType = result_type;
+        // If function returns a reference, the call is an lvalue
+        if (result_type && strstr(result_type, "&") != NULL) {
+            $$->isLValue = 1;
+        }
     }
     | postfix_expression LPAREN argument_expression_list RPAREN {
         // Enhanced function call type checking
@@ -2537,6 +2541,10 @@ postfix_expression:
         addChild($$, $1);
         addChild($$, $3);
         $$->dataType = result_type;
+        // If function returns a reference, the call is an lvalue
+        if (result_type && strstr(result_type, "&") != NULL) {
+            $$->isLValue = 1;
+        }
     }
     | postfix_expression DOT IDENTIFIER {
         // Enhanced struct member access type checking
