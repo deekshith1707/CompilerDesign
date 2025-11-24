@@ -138,6 +138,17 @@ typedef struct MIPSCodeGenerator {
     // String literal mapping (Phase 3)
     char stringLiterals[100][256];  // Store string literals
     int stringCount;                 // Count of string literals
+    
+    // Float constant mapping
+    char floatConstants[100][64];    // Store float constants
+    int floatConstCount;             // Count of float constants
+    
+    // Variable type tracking
+    struct {
+        char varName[128];
+        char varType[32];  // "int", "float", "double", "bool", etc.
+    } varTypes[MAX_VARIABLES];
+    int varTypeCount;
 } MIPSCodeGenerator;
 
 // ============================================================================

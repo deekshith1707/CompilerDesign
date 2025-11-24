@@ -102,7 +102,16 @@ bool isFloatConstant(const char* str) {
     
     // Check for decimal point and ensure it's a numeric constant
     bool hasDot = false;
-    for (int i = 0; str[i] != '\0'; i++) {
+    int len = strlen(str);
+    
+    // Check if ends with 'f' or 'F' suffix (float literal)
+    bool hasSuffix = false;
+    if (len > 0 && (str[len-1] == 'f' || str[len-1] == 'F')) {
+        hasSuffix = true;
+        len--; // Don't check the suffix in the loop
+    }
+    
+    for (int i = 0; i < len; i++) {
         if (str[i] == '.') {
             hasDot = true;
         } else if (!isdigit(str[i]) && str[i] != '-' && str[i] != '+' && str[i] != 'e' && str[i] != 'E') {
@@ -111,7 +120,42 @@ bool isFloatConstant(const char* str) {
         }
     }
     
-    return hasDot;
+    return hasDot || hasSuffix;
+}
+
+/**
+ * Register a variable's type
+ */
+void registerVariableType(MIPSCodeGenerator* codegen, const char* varName, const char* varType) {
+    if (!varName || !varType || codegen->varTypeCount >= MAX_VARIABLES) return;
+    
+    // Check if already registered - update if found
+    for (int i = 0; i < codegen->varTypeCount; i++) {
+        if (strcmp(codegen->varTypes[i].varName, varName) == 0) {
+            strcpy(codegen->varTypes[i].varType, varType);
+            return;
+        }
+    }
+    
+    // Add new entry
+    strcpy(codegen->varTypes[codegen->varTypeCount].varName, varName);
+    strcpy(codegen->varTypes[codegen->varTypeCount].varType, varType);
+    codegen->varTypeCount++;
+}
+
+/**
+ * Get a variable's type
+ */
+const char* getVariableType(MIPSCodeGenerator* codegen, const char* varName) {
+    if (!varName) return "int";  // Default to int
+    
+    for (int i = 0; i < codegen->varTypeCount; i++) {
+        if (strcmp(codegen->varTypes[i].varName, varName) == 0) {
+            return codegen->varTypes[i].varType;
+        }
+    }
+    
+    return "int";  // Default to int if not found
 }
 
 /**
@@ -632,11 +676,18 @@ void initMIPSCodeGen(MIPSCodeGenerator* codegen) {
     // Initialize function call state (Phase 3)
     codegen->currentParamCount = 0;
     codegen->stringCount = 0;
+    codegen->floatConstCount = 0;
+    codegen->varTypeCount = 0;
     for (int i = 0; i < 10; i++) {
         codegen->paramRegisterMap[i] = -1;
     }
     for (int i = 0; i < 100; i++) {
         codegen->stringLiterals[i][0] = '\0';
+        codegen->floatConstants[i][0] = '\0';
+    }
+    for (int i = 0; i < MAX_VARIABLES; i++) {
+        codegen->varTypes[i].varName[0] = '\0';
+        codegen->varTypes[i].varType[0] = '\0';
     }
     
     // printf("MIPS Code Generator initialized.\n");  // Commented for clean output
@@ -961,27 +1012,34 @@ void loadVariable(MIPSCodeGenerator* codegen, const char* varName, int regNum) {
             return;
         }
         
-        // Handle float constants specially (MIPS li doesn't support floats)
+        // Handle float constants - load from .data section
         if (isFloatConstant(varName)) {
-            // CRITICAL FIX: For float constants, use ceiling for positive non-zero values
-            // This ensures loop increments like +0.5 become +1, allowing loop termination
-            // For negative values or zero, use standard truncation
-            double floatValue = atof(varName);
-            int intValue;
-            
-            if (floatValue > 0.0 && floatValue < 1.0) {
-                // Small positive fractions (0.1, 0.5, etc.) round up to 1 for loop progress
-                intValue = 1;
-            } else if (floatValue < 0.0 && floatValue > -1.0) {
-                // Small negative fractions (-0.5, etc.) round down to -1
-                intValue = -1;
-            } else {
-                // Standard truncation for larger values and zero
-                intValue = (int)floatValue;
+            // Find or create float constant in data section
+            int floatIndex = -1;
+            for (int i = 0; i < codegen->floatConstCount; i++) {
+                if (strcmp(codegen->floatConstants[i], varName) == 0) {
+                    floatIndex = i;
+                    break;
+                }
             }
             
-            sprintf(instr, "    li %s, %d    # Float %s -> int %d", 
-                    getRegisterName(regNum), intValue, varName, intValue);
+            if (floatIndex < 0 && codegen->floatConstCount < 100) {
+                // Add new float constant
+                floatIndex = codegen->floatConstCount;
+                strcpy(codegen->floatConstants[floatIndex], varName);
+                codegen->floatConstCount++;
+            }
+            
+            if (floatIndex >= 0) {
+                // Load float bits from data section as integer for storage
+                sprintf(instr, "    lw %s, _float%d    # Load float %s", 
+                        getRegisterName(regNum), floatIndex, varName);
+            } else {
+                // Fallback - convert to integer
+                double floatValue = atof(varName);
+                sprintf(instr, "    li %s, %d    # Float %s (fallback)", 
+                        getRegisterName(regNum), (int)floatValue, varName);
+            }
             emitMIPS(codegen, instr);
             return;
         }
@@ -1299,6 +1357,72 @@ void translateArithmetic(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
     char instr[256];
     int regResult;  // Declare here, assign in each branch
     
+    // FLOAT ARITHMETIC DETECTION: Check if operation involves floats via type annotation or constant detection
+    bool isFloatOp = false;
+    if (quad->resultType[0] != '\0') {
+        // Use type annotation if available
+        isFloatOp = (strcmp(quad->resultType, "float") == 0 || strcmp(quad->resultType, "double") == 0);
+    } else {
+        // Fallback: check if either operand is a float constant or float variable
+        isFloatOp = isFloatConstant(quad->arg1) || isFloatConstant(quad->arg2) ||
+                    strcmp(getVariableType(codegen, quad->arg1), "float") == 0 ||
+                    strcmp(getVariableType(codegen, quad->arg2), "float") == 0;
+    }
+    
+    if (isFloatOp && strlen(quad->arg2) > 0) {
+        // Handle float arithmetic using floating-point coprocessor
+        // Load arg1 into float register
+        int freg1 = 0;  // Use $f0-$f3 for temporaries
+        int regArg1Temp = getReg(codegen, quad->arg1, irIndex);
+        sprintf(instr, "    mtc1 %s, $f%d    # Move arg1 to float reg", 
+                getRegisterName(regArg1Temp), freg1);
+        emitMIPS(codegen, instr);
+        
+        // Load arg2 into float register
+        int freg2 = 2;
+        int regArg2Temp = getReg(codegen, quad->arg2, irIndex);
+        sprintf(instr, "    mtc1 %s, $f%d    # Move arg2 to float reg", 
+                getRegisterName(regArg2Temp), freg2);
+        emitMIPS(codegen, instr);
+        
+        // Perform floating-point operation
+        int fregResult = 4;
+        if (strcmp(quad->op, "ADD") == 0 || strcmp(quad->op, "+") == 0) {
+            sprintf(instr, "    add.s $f%d, $f%d, $f%d", fregResult, freg1, freg2);
+        } else if (strcmp(quad->op, "SUB") == 0 || strcmp(quad->op, "-") == 0) {
+            sprintf(instr, "    sub.s $f%d, $f%d, $f%d", fregResult, freg1, freg2);
+        } else if (strcmp(quad->op, "MUL") == 0 || strcmp(quad->op, "*") == 0) {
+            sprintf(instr, "    mul.s $f%d, $f%d, $f%d", fregResult, freg1, freg2);
+        } else if (strcmp(quad->op, "DIV") == 0 || strcmp(quad->op, "/") == 0) {
+            sprintf(instr, "    div.s $f%d, $f%d, $f%d", fregResult, freg1, freg2);
+        } else {
+            // Fallback to integer operations
+            isFloatOp = false;
+            goto integer_arithmetic;
+        }
+        emitMIPS(codegen, instr);
+        
+        // Move result back to integer register for storage
+        regResult = getReg(codegen, quad->result, irIndex);
+        sprintf(instr, "    mfc1 %s, $f%d    # Move float result to int reg", 
+                getRegisterName(regResult), fregResult);
+        emitMIPS(codegen, instr);
+        
+        // Update descriptors and store
+        updateDescriptors(codegen, regResult, quad->result);
+        codegen->regDescriptors[regResult].isDirty = true;
+        storeVariable(codegen, quad->result, regResult);
+        int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+        if (addrIdx >= 0) {
+            codegen->addrDescriptors[addrIdx].inMemory = true;
+        }
+        
+        // Register result as float type
+        registerVariableType(codegen, quad->result, "float");
+        return;
+    }
+    
+integer_arithmetic:
     // CRITICAL FIX: Detect pointer arithmetic FIRST before loading arg1
     // When doing ptr+1 or arr+3, we need to get the ADDRESS, not the VALUE
     bool isPointerArithmetic = false;
@@ -1524,6 +1648,14 @@ void translateArithmetic(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
     // Update descriptors - result is now in register
     updateDescriptors(codegen, regResult, quad->result);
     codegen->regDescriptors[regResult].isDirty = true;
+    
+    // CRITICAL FIX: Store result to memory immediately for reloadability
+    // This ensures the value is available when needed by future instructions (e.g., printf parameters)
+    storeVariable(codegen, quad->result, regResult);
+    int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+    if (addrIdx >= 0) {
+        codegen->addrDescriptors[addrIdx].inMemory = true;
+    }
 }
 
 /**
@@ -1808,6 +1940,22 @@ void translateAssignment(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
     // Update descriptors
     updateDescriptors(codegen, regDest, quad->result);
     codegen->regDescriptors[regDest].isDirty = false;  // Not dirty since we just stored it
+    
+    // Register variable type if available in quad
+    if (quad->resultType[0] != '\0') {
+        registerVariableType(codegen, quad->result, quad->resultType);
+    }
+    // Also infer type from constant assignment (e.g., x = 10.0f means x is float)
+    else if (isFloatConstant(quad->arg1)) {
+        registerVariableType(codegen, quad->result, "float");
+    }
+    // Propagate type from source variable (e.g., t1 = t0 means t1 has same type as t0)
+    else if (!isConstantValue(quad->arg1) && quad->arg1[0] != '&' && quad->arg1[0] != '"') {
+        const char* srcType = getVariableType(codegen, quad->arg1);
+        if (strcmp(srcType, "float") == 0 || strcmp(srcType, "double") == 0) {
+            registerVariableType(codegen, quad->result, srcType);
+        }
+    }
 }
 
 /**
@@ -2262,14 +2410,23 @@ void translateParam(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
             // Numeric constant - use loadVariable which handles floats properly
             loadVariable(codegen, paramValue, argReg);
         } else {
-            // Get register for variable
-            int srcReg = getReg(codegen, paramValue, irIndex);
-            
-            // Move to argument register
-            sprintf(instr, "    move %s, %s", 
-                   getRegisterName(argReg), 
-                   getRegisterName(srcReg));
-            emitMIPS(codegen, instr);
+            // Variable - for I/O calls, load directly from memory to avoid register allocation issues
+            if (isIOCall) {
+                char location[128];
+                getMemoryLocation(codegen, paramValue, location);
+                sprintf(instr, "    lw %s, %s    # Load %s for I/O call", 
+                       getRegisterName(argReg), location, paramValue);
+                emitMIPS(codegen, instr);
+            } else {
+                // Get register for variable
+                int srcReg = getReg(codegen, paramValue, irIndex);
+                
+                // Move to argument register
+                sprintf(instr, "    move %s, %s", 
+                       getRegisterName(argReg), 
+                       getRegisterName(srcReg));
+                emitMIPS(codegen, instr);
+            }
         }
         
         // Track which register holds this param
@@ -2420,8 +2577,10 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
                     if (spec == 'd' || spec == 'i') {
                         sprintf(instr, "    li $v0, 1    # syscall 1: print_int");
                     } else if (spec == 'f') {
-                        // No float support - print as integer
-                        sprintf(instr, "    li $v0, 1    # syscall 1: print_int (float as int)");
+                        // Float support - move from integer register to float register and print
+                        sprintf(instr, "    mtc1 $a0, $f12    # Move to float register");
+                        emitMIPS(codegen, instr);
+                        sprintf(instr, "    li $v0, 2    # syscall 2: print_float");
                     } else if (spec == 'c') {
                         sprintf(instr, "    li $v0, 11   # syscall 11: print_char");
                     } else if (spec == 's') {
@@ -3519,7 +3678,42 @@ void generateDataSection(MIPSCodeGenerator* codegen) {
         }
     }
     
-    // 2. String literals (scan IR for PARAM and ASSIGN instructions with strings)
+    // 2. Float constants (scan IR for float literals)
+    codegen->floatConstCount = 0;
+    for (int i = 0; i < codegen->irCount; i++) {
+        const char* args[] = {codegen->IR[i].arg1, codegen->IR[i].arg2, codegen->IR[i].result};
+        for (int a = 0; a < 3; a++) {
+            if (args[a] && isFloatConstant(args[a])) {
+                bool alreadyAdded = false;
+                for (int j = 0; j < codegen->floatConstCount; j++) {
+                    if (strcmp(codegen->floatConstants[j], args[a]) == 0) {
+                        alreadyAdded = true;
+                        break;
+                    }
+                }
+                if (!alreadyAdded && codegen->floatConstCount < 100) {
+                    strcpy(codegen->floatConstants[codegen->floatConstCount], args[a]);
+                    codegen->floatConstCount++;
+                }
+            }
+        }
+    }
+    
+    // Emit float constants
+    for (int i = 0; i < codegen->floatConstCount; i++) {
+        char directive[256];
+        char cleanValue[64];
+        strcpy(cleanValue, codegen->floatConstants[i]);
+        // Remove 'f' suffix if present
+        int len = strlen(cleanValue);
+        if (len > 0 && (cleanValue[len-1] == 'f' || cleanValue[len-1] == 'F')) {
+            cleanValue[len-1] = '\0';
+        }
+        sprintf(directive, "_float%d: .float %s", i, cleanValue);
+        emitMIPS(codegen, directive);
+    }
+    
+    // 3. String literals (scan IR for PARAM and ASSIGN instructions with strings)
     codegen->stringCount = 0;
     for (int i = 0; i < codegen->irCount; i++) {
         // Check PARAM instructions (for printf/scanf format strings and arguments)
@@ -3780,11 +3974,90 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
     else if (strcmp(quad->op, "STORE_OFFSET") == 0) {
         translateStoreOffset(codegen, quad, irIndex);
     }
-    // CAST operations - treat as simple move/assign
-    // In MIPS, char and int are both stored in 32-bit registers, so casting is just moving the value
-    else if (strstr(quad->op, "CAST") != NULL) {
-        // CAST is just a register move: load arg1 into a register, then store to result
-        translateAssignment(codegen, quad, irIndex);
+    // CAST operations - proper type conversion
+    // CAST_int_to_float, CAST_float_to_int, etc. require actual conversion instructions
+    else if (strstr(quad->op, "CAST") != NULL || 
+             strcmp(quad->op, "FLOAT_TO_DOUBLE") == 0 ||
+             strcmp(quad->op, "DOUBLE_TO_FLOAT") == 0 ||
+             strcmp(quad->op, "INT_TO_FLOAT") == 0 ||
+             strcmp(quad->op, "FLOAT_TO_INT") == 0) {
+        
+        char instr[256];
+        
+        // Handle int to float conversion
+        if (strstr(quad->op, "int_to_float") != NULL || strcmp(quad->op, "INT_TO_FLOAT") == 0) {
+            // Load integer value
+            int regSrc = getReg(codegen, quad->arg1, irIndex);
+            
+            // Convert: move to FPU, convert, move back
+            sprintf(instr, "    mtc1 %s, $f0    # Move int to FPU", getRegisterName(regSrc));
+            emitMIPS(codegen, instr);
+            sprintf(instr, "    cvt.s.w $f0, $f0    # Convert int to float");
+            emitMIPS(codegen, instr);
+            
+            // Get result register
+            int regDest = getReg(codegen, quad->result, irIndex);
+            sprintf(instr, "    mfc1 %s, $f0    # Move float result back", getRegisterName(regDest));
+            emitMIPS(codegen, instr);
+            
+            // Store and update
+            storeVariable(codegen, quad->result, regDest);
+            updateDescriptors(codegen, regDest, quad->result);
+            codegen->regDescriptors[regDest].isDirty = false;
+            int addrIdx = findOrCreateAddrDesc(codegen, quad->result);
+            if (addrIdx >= 0) {
+                codegen->addrDescriptors[addrIdx].inMemory = true;
+            }
+            registerVariableType(codegen, quad->result, "float");
+        }
+        // Handle float to int conversion
+        else if (strstr(quad->op, "float_to_int") != NULL || strcmp(quad->op, "FLOAT_TO_INT") == 0) {
+            // Load float value
+            int regSrc = getReg(codegen, quad->arg1, irIndex);
+            
+            // Convert: move to FPU, convert with truncation, move back
+            sprintf(instr, "    mtc1 %s, $f0    # Move float to FPU", getRegisterName(regSrc));
+            emitMIPS(codegen, instr);
+            sprintf(instr, "    cvt.w.s $f0, $f0    # Convert float to int (truncate)");
+            emitMIPS(codegen, instr);
+            
+            // Get result register
+            int regDest = getReg(codegen, quad->result, irIndex);
+            sprintf(instr, "    mfc1 %s, $f0    # Move int result back", getRegisterName(regDest));
+            emitMIPS(codegen, instr);
+            
+            // Store and update
+            storeVariable(codegen, quad->result, regDest);
+            updateDescriptors(codegen, regDest, quad->result);
+            codegen->regDescriptors[regDest].isDirty = false;
+            int addrIdx2 = findOrCreateAddrDesc(codegen, quad->result);
+            if (addrIdx2 >= 0) {
+                codegen->addrDescriptors[addrIdx2].inMemory = true;
+            }
+            registerVariableType(codegen, quad->result, "int");
+        }
+        // Handle int to bool conversion
+        else if (strstr(quad->op, "int_to_bool") != NULL) {
+            int regSrc = getReg(codegen, quad->arg1, irIndex);
+            int regDest = getReg(codegen, quad->result, irIndex);
+            
+            // Convert to boolean (0 or 1)
+            sprintf(instr, "    sltu %s, $zero, %s    # Convert to bool", 
+                   getRegisterName(regDest), getRegisterName(regSrc));
+            emitMIPS(codegen, instr);
+            
+            storeVariable(codegen, quad->result, regDest);
+            updateDescriptors(codegen, regDest, quad->result);
+            codegen->regDescriptors[regDest].isDirty = false;
+            int addrIdx3 = findOrCreateAddrDesc(codegen, quad->result);
+            if (addrIdx3 >= 0) {
+                codegen->addrDescriptors[addrIdx3].inMemory = true;
+            }
+        }
+        // For other casts (char/int, float/double, etc.), just do a simple move
+        else {
+            translateAssignment(codegen, quad, irIndex);
+        }
     }
 }
 
@@ -4007,6 +4280,9 @@ void testMIPSCodeGeneration() {
     
     // Compute activation records (from Phase 1)
     computeActivationRecords();
+    
+    // DEBUG: Print activation records
+    printActivationRecords();
     
     // Copy activation records to codegen
     for (int i = 0; i < activationRecordCount; i++) {

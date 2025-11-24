@@ -705,10 +705,11 @@ int isIntegerType(const char* type) {
     char* resolved = resolveTypedef(type);
     const char* actual_type = resolved ? resolved : type;
     
-    // Check for basic integer types
+    // Check for basic integer types (including bool and _Bool)
     int result = (strcmp(actual_type, "int") == 0 || strcmp(actual_type, "char") == 0 ||
             strcmp(actual_type, "short") == 0 || strcmp(actual_type, "long") == 0 ||
-            strcmp(actual_type, "enum") == 0 || strcmp(actual_type, "_Bool") == 0);
+            strcmp(actual_type, "enum") == 0 || strcmp(actual_type, "_Bool") == 0 ||
+            strcmp(actual_type, "bool") == 0);
     
     if (resolved) free(resolved);
     return result;

@@ -30,6 +30,7 @@ typedef struct {
     char arg1[128];
     char arg2[128];
     char result[128];
+    char resultType[32];  // Type of result: "int", "float", "double", "bool", etc.
 } Quadruple;
 
 // Global IR infrastructure
@@ -45,6 +46,7 @@ extern int staticVarCount;
 // Function prototypes
 void emit(const char* op, const char* arg1, const char* arg2, const char* result);
 int emitWithIndex(const char* op, const char* arg1, const char* arg2, const char* result);
+void emitTyped(const char* op, const char* arg1, const char* arg2, const char* result, const char* type);
 char* newTemp();
 char* newLabel();
 int nextQuad();

@@ -28,6 +28,7 @@ void emit(const char* op, const char* arg1, const char* arg2, const char* result
     strcpy(IR[irCount].arg1, arg1 ? arg1 : "");
     strcpy(IR[irCount].arg2, arg2 ? arg2 : "");
     strcpy(IR[irCount].result, result ? result : "");
+    strcpy(IR[irCount].resultType, "");  // Default: no type info
     irCount++;
 }
 
@@ -41,7 +42,22 @@ int emitWithIndex(const char* op, const char* arg1, const char* arg2, const char
     strcpy(IR[irCount].arg1, arg1 ? arg1 : "");
     strcpy(IR[irCount].arg2, arg2 ? arg2 : "");
     strcpy(IR[irCount].result, result ? result : "");
+    strcpy(IR[irCount].resultType, "");  // Default: no type info
     return irCount++;
+}
+
+// Function: emit with type information
+void emitTyped(const char* op, const char* arg1, const char* arg2, const char* result, const char* type) {
+    if (irCount >= MAX_IR_SIZE) {
+        cerr << "Error: IR size limit exceeded" << endl;
+        return;
+    }
+    strcpy(IR[irCount].op, op);
+    strcpy(IR[irCount].arg1, arg1 ? arg1 : "");
+    strcpy(IR[irCount].arg2, arg2 ? arg2 : "");
+    strcpy(IR[irCount].result, result ? result : "");
+    strcpy(IR[irCount].resultType, type ? type : "");
+    irCount++;
 }
 
 // Return the next available quad index

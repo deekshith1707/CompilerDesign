@@ -913,9 +913,9 @@ char* generate_ir(TreeNode* node) {
                             if (isReferenceVariable(lhs_name)) {
                                 char deref_lhs[256];
                                 sprintf(deref_lhs, "[%s]", lhs_name);
-                                emit("STORE", rhs_result, "", deref_lhs);
+                                emitTyped("STORE", rhs_result, "", deref_lhs, node->children[0]->dataType);
                             } else {
-                                emit("ASSIGN", rhs_result, "", lhs_name);
+                                emitTyped("ASSIGN", rhs_result, "", lhs_name, node->children[0]->dataType);
                             }
                         }
                     }
@@ -1590,7 +1590,7 @@ char* generate_ir(TreeNode* node) {
                         }
                     }
                     char* temp = newTemp();
-                    emit("ADD", left, right, temp);
+                    emitTyped("ADD", left, right, temp, node->dataType ? node->dataType : "int");
                     return temp;
                 }
             } else if (strcmp(node->value, "-") == 0) {
@@ -1629,7 +1629,7 @@ char* generate_ir(TreeNode* node) {
                         }
                     }
                     char* temp = newTemp();
-                    emit("SUB", left, right, temp);
+                    emitTyped("SUB", left, right, temp, node->dataType ? node->dataType : "int");
                     return temp;
                 }
             }
@@ -1653,11 +1653,11 @@ char* generate_ir(TreeNode* node) {
             char* temp = newTemp();
             
             if (strcmp(node->value, "*") == 0) {
-                emit("MUL", left, right, temp);
+                emitTyped("MUL", left, right, temp, node->dataType ? node->dataType : "int");
             } else if (strcmp(node->value, "/") == 0) {
-                emit("DIV", left, right, temp);
+                emitTyped("DIV", left, right, temp, node->dataType ? node->dataType : "int");
             } else if (strcmp(node->value, "%") == 0) {
-                emit("MOD", left, right, temp);
+                emitTyped("MOD", left, right, temp, node->dataType ? node->dataType : "int");
             }
             return temp;
         }
