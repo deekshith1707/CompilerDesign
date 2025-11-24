@@ -324,7 +324,7 @@ void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad);
 /**
  * Translate label
  */
-void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad);
+void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad, bool skipSpill = false);
 
 /**
  * Translate array access (reading from array)
