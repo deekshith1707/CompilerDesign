@@ -1,0 +1,79 @@
+#include <stdio.h>
+
+int main() {
+    // Enum Definition
+    enum state {
+        s_start,        // 0
+        s_wait = 5,
+        s_error,        // 6
+        s_finish = 10
+    };
+    
+    // Union Definition
+    union payload {
+        int i;
+        float f;
+        int arr[3];
+    };
+
+    int i_res;
+    float f_res;
+    enum state s1 = s_error; // s1 is initialized to 6
+    
+    printf("--- Enum and Union Feature Test ---\n");
+
+    // Test 1: Enum Value Check
+    printf("Test 1: Enum Values\n");
+    // Check sequential assignment (s_error should be 6)
+    int enum_sum = s_finish + s_wait; // 10 + 5 = 15
+    printf("s_error value: %d, s_finish + s_wait: %d\n", s1, enum_sum);
+    printf("Expected s_error value: 6, s_finish + s_wait: 15\n\n");
+
+    // Test 2: Switch on Enum
+    printf("Test 2: Switch on Enum\n");
+    int switch_res = 0;
+    
+    switch (s1) { // s1 is 6 (s_error)
+        case s_start:
+            switch_res = 1;
+            break;
+        case s_finish:
+            switch_res = 2;
+            break;
+        case s_error: // Expected Match (6)
+            switch_res = 3;
+            break;
+        default:
+            switch_res = 99;
+            break;
+    }
+    printf("Switch result: %d\n", switch_res);
+    printf("Expected Switch result: 3\n\n");
+    
+    // Test 3: Union Assignment and Access
+    union payload p1;
+    
+    printf("Test 3: Union Assignment and Access\n");
+
+    // Test 3a: Union Read/Write
+    printf("Test 3a: Union Read/Write\n");
+    
+    // Write to the float member
+    p1.f = 123.45f;
+    f_res = p1.f;
+    printf("Value after writing/reading float: %f\n", f_res);
+    printf("Expected Value: 123.450000\n");
+
+    // Write to the integer member
+    p1.i = 400;
+    i_res = p1.i;
+    printf("Value after writing/reading int: %d\n", i_res);
+    printf("Expected Value: 400\n");
+
+    // Access array member (arr[0]) which shares space with i
+    i_res = p1.arr[0];
+    printf("Accessing arr[0] after int write (i): %d\n", i_res);
+    printf("Expected Value: 400\n");
+    
+    return 0;
+}

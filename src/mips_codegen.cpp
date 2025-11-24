@@ -3078,22 +3078,13 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
             continue;
         }
         
-        // Check if this register holds a temporary variable (tN)
-        // Temporaries only exist in registers, so we must preserve them
-        bool holdsTemporary = false;
-        if (codegen->regDescriptors[r].varCount > 0) {
-            for (int v = 0; v < codegen->regDescriptors[r].varCount; v++) {
-                const char* varName = codegen->regDescriptors[r].varNames[v];
-                if (varName[0] == 't' && isdigit(varName[1])) {
-                    holdsTemporary = true;
-                    break;
-                }
-            }
-        }
-        
-        if (!holdsTemporary) {
-            clearRegisterDescriptor(codegen, r);
-        }
+        // CRITICAL FIX: Clear ALL caller-saved registers after function calls
+        // This includes temporaries! Even though temporaries only exist in registers,
+        // they MUST be reloaded from memory after a function call because:
+        // 1. The return value was already stored to memory (line 3051)
+        // 2. Recursive calls clobber all caller-saved registers
+        // 3. Example: fib(n-1) + fib(n-2) - first result must be in memory before second call
+        clearRegisterDescriptor(codegen, r);
     }
     for (int r = REG_A0; r <= REG_A3; r++) {
         clearRegisterDescriptor(codegen, r);

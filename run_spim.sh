@@ -20,7 +20,7 @@ echo "Running MIPS Assembly files with SPIM"
 echo "============================================"
 
 # Run all .s files in the test directory
-for asm_file in $(ls -1v ${TEST_DIR}/*.s 2>/dev/null); do
+find ${TEST_DIR} -name "*.s" -type f | sort -V | while read -r asm_file; do
     if [ -f "$asm_file" ]; then
         echo ""
         echo "--------------------------------------------"

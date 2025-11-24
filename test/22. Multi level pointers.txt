@@ -1,0 +1,47 @@
+#include <stdio.h>
+
+int main() {
+    int v = 42;    // Initial value
+    int *p1;       // Pointer to int
+    int **p2;      // Pointer to pointer to int
+    int ***p3;     // Pointer to pointer to pointer to int
+    
+    printf("--- Multi-Level Pointers Test ---\n");
+
+    // Initialization (Setting up the chain)
+    p1 = &v;
+    p2 = &p1;
+    p3 = &p2;
+
+    // Test 1: Single Indirection (p1)
+    printf("Test 1: Single Indirection\n");
+    int res1 = *p1;
+    printf("Value via *p1: %d\n", res1);
+    printf("Expected Value: 42\n\n");
+
+    // Test 2: Double Indirection (p2)
+    printf("Test 2: Double Indirection\n");
+    int res2 = **p2;
+    printf("Value via **p2: %d\n", res2);
+    printf("Expected Value: 42\n\n");
+
+    // Test 3: Triple Indirection (p3)
+    printf("Test 3: Triple Indirection\n");
+    int res3 = ***p3;
+    printf("Value via ***p3: %d\n", res3);
+    printf("Expected Value: 42\n\n");
+
+    // Test 4: Modification via Triple Indirection
+    printf("Test 4: Modification via Triple Indirection\n");
+    ***p3 = 99; // Change v through p3
+    printf("New value of v: %d\n", v);
+    printf("Expected New value of v: 99\n\n");
+
+    // Test 5: Re-verification after modification
+    printf("Test 5: Re-verification\n");
+    int res5 = **p2; // Check value via p2
+    printf("Value via **p2 after change: %d\n", res5);
+    printf("Expected Value: 99\n");
+
+    return 0;
+}

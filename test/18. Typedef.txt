@@ -1,0 +1,77 @@
+#include <stdio.h>
+
+// 1. SIMPLE TYPES
+typedef int TId;
+typedef float TFlt;
+typedef TId TSize; // Typedef using a previously defined typedef
+
+// 2. POINTERS
+typedef TId* PtrI;       // Pointer to TId
+
+// 3. ENUM
+typedef enum {
+    SMALL = 1,
+    MEDIUM = 5,
+    LARGE = 10
+} Size;
+
+// 4. NESTED TYPEDEF (Struct using other typedefs)
+typedef struct {
+    PtrI val_ptr;          // Uses alias from Step 2
+    Size s;                 // Uses alias from Step 3
+    TSize count;           // Uses alias from Step 1
+} Container;
+
+// 5. UNION
+typedef union {
+    TId id;
+    TFlt flt;
+} Item;
+
+// Utility function 
+TId triple_val(TId v) {
+    return v * 3;
+}
+
+
+int main() {
+    int i_ctrl = 10;
+    
+    // Test 1: Variable declarations using simple aliases
+    TId i_status = 99;
+    Item current_item;
+    
+    // Test 2: Initialization of complex types
+    PtrI p_val = &i_ctrl; 
+    TFlt f1 = 10.5f;
+    TFlt f2 = 20.0f;
+    TFlt f3 = 30.5f;
+    
+    // Test 3: Enum variable
+    Size current_s = MEDIUM;
+    
+    // Test 4: Nested structure initialization and access
+    Container c1;
+    c1.val_ptr = p_val;
+    c1.s = current_s;
+    c1.count = 25;
+    
+    // Test 5: Direct function call (not via pointer)
+    TId tripled_val = triple_val(i_ctrl); // Call function: 10 * 3 = 30
+
+    // Test 6: Union assignment
+    current_item.flt = f1; // 10.5f
+    
+    printf("--- Typedef Feature Verification ---\n");
+    
+    printf("Container Count: %d, Size Enum: %d\n", c1.count, c1.s);
+    printf("Expected Container Count: 25, Size Enum: 5\n");
+
+    printf("Float Values: %f, Tripled Val: %d\n", f3, tripled_val);
+    printf("Expected Float Values: 30.500000, Tripled Val: 30\n");
+
+    printf("Union Item (as float): %f, Status ID: %d\n", current_item.flt, i_status);
+    printf("Expected Union Item: 10.500000, Status ID: 99\n");
+    
+    return 0;
+}

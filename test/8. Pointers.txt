@@ -1,0 +1,55 @@
+#include <stdio.h>
+
+int main() {
+    int a = 10;
+    int *p1;
+    int **p2;
+    int arr[] = {100, 200, 300};
+    
+    printf("--- Pointers Feature Test ---\n");
+    
+    // Test 1: Address and Dereference
+    printf("Test 1: Address and Dereference\n");
+    p1 = &a; 
+    printf("*p1: %d (Expected: 10)\n", *p1); 
+    
+    // Test 2: Double Indirection
+    printf("Test 2: Double Indirection\n");
+    p2 = &p1;
+    printf("**p2: %d (Expected: 10)\n\n", **p2); 
+
+    // Test 3: Value Modification
+    printf("Test 3: Value Modification\n");
+    *p1 = 25; 
+    printf("New value of a: %d (Expected: 25)\n", a);
+    
+    // Test 4: Pointer-to-Pointer Modification
+    printf("Test 4: Pointer-to-Pointer Modification\n");
+    **p2 = 35;
+    printf("New value of a: %d (Expected: 35)\n\n", a);
+
+    // Test 5: Pointer Arithmetic (Addition)
+    printf("Test 5: Pointer Arithmetic (Addition)\n");
+    p1 = arr;
+    p1 = p1 + 1;
+    printf("*(p1 + 1): %d (Expected: 200)\n", *p1); 
+
+    // Test 6: Pointer Arithmetic (Subtraction)
+    printf("Test 6: Pointer Arithmetic (Subtraction)\n");
+    p1 = p1 - 1;
+    printf("*(p1 - 1): %d (Expected: 100)\n", *p1); 
+
+    // Test 7: Pointer Indexing
+    printf("Test 7: Pointer Indexing\n");
+    printf("p1[2]: %d (Expected: 300)\n\n", p1[2]);
+    
+    // Test 8: Pointer Comparison
+    printf("Test 8: Pointer Comparison\n");
+    if (p1 == &arr[0]) {
+        printf("Pointer Comparison: PASS\n");
+    } else {
+        printf("Pointer Comparison: FAIL\n");
+    }
+    
+    return 0;
+}

@@ -1,0 +1,71 @@
+#include <stdio.h>
+#include <stdbool.h>
+
+int is_true() { return 1; }
+int is_false() { return 0; }
+
+int main() {
+    int x = 0;
+    int y = 10;
+    
+    printf("--- Custom 'until' Loop Feature Test ---\n");
+    
+    // Test 1: Simple Loop
+    printf("Test 1: Simple Loop\n");
+    x = 0;
+    do {
+        x++;
+    } while (!(x >= 5)); 
+
+    printf("Final x: %d\n", x);
+    printf("Expected Final x: 5\n\n");
+
+    // Test 2: Logical Operators
+    printf("Test 2: Logical Operators\n");
+    x = 0;
+    y = 10;
+    do {
+        x++;
+    } while (!(x > 3 && y == 10));
+
+    printf("Final x: %d\n", x);
+    printf("Expected Final x: 4\n\n");
+
+    // Test 3: Function Call Condition
+    printf("Test 3: Function Call Condition\n");
+    x = 0;
+    do {
+        x++;
+    } while (!(is_true()));
+
+    printf("Final x: %d\n", x);
+    printf("Expected Final x: 1\n\n");
+
+    // Test 4: Break and Continue
+    printf("Test 4: Break and Continue\n");
+    x = 0;
+    int s = 0;
+    do {
+        x++;
+        if (x == 3) continue;
+        if (x == 5) break; 
+        s = s + x;
+    } while (!(x >= 10));
+
+    printf("Final x after break: %d\n", x);
+    printf("Expected Final x after break: 5\n");
+    printf("Final s after break: %d\n", s);
+    printf("Expected Final s after break: 7\n\n");
+    
+    // Test 5: Variable Scope
+    printf("Test 5: Variable Scope\n");
+    do {
+        int p = 5;
+        p++;
+    } while (is_false());
+    
+    printf("x (unchanged): %d\n", x);
+    printf("Expected x (unchanged): 5\n");
+    
+    return 0;
+}

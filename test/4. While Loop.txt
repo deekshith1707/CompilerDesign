@@ -1,0 +1,74 @@
+#include <stdio.h>
+
+int main() {
+    int ctr = 0;
+    int p = 1;  
+    int s = 0; 
+    int i, j;   
+    
+    printf("--- While Loop Feature Test ---\n");
+    
+    // --- Test 1: Simple Loop Execution ---
+    // Counts from 0 up to 4 (5 iterations). Expected ctr: 5
+    printf("Test 1: Simple Loop\n");
+    while (ctr < 5) {
+        ctr = ctr + 1;
+    }
+    printf("Final ctr: %d (Expected: 5)\n\n", ctr);
+    
+    // --- Test 2: Multiplicative Logic ---
+    // Calculates product of 1 * 2 * 3 * 4 = 24
+    printf("Test 2: Multiplicative Logic\n");
+    ctr = 1;
+    while (ctr <= 4) {
+        p = p * ctr;
+        ctr = ctr + 1;
+    }
+    printf("Final product (p): %d (Expected: 24)\n\n", p);
+    
+    // --- Test 3: Loop with 'break' Statement ---
+    // Sum: 5+6+7 = 18. Loop starts at 5, breaks when ctr reaches 7.
+    printf("Test 3: Loop with BREAK\n");
+    s = 0;
+    ctr = 5;
+    while (ctr < 10) {
+        s = s + ctr;
+        if (ctr == 7) {
+            break; 
+        }
+        ctr = ctr + 1;
+    }
+    printf("Final sum (s) after break: %d (Expected: 18)\n\n", s);
+    
+    // --- Test 4: Loop with 'continue' Statement ---
+    // Sum: 1 + 2 + (skip 3) + 4 + 5 = 12
+    printf("Test 4: Loop with CONTINUE\n");
+    s = 0;
+    ctr = 1;
+    while (ctr <= 5) {
+        if (ctr == 3) {
+            ctr = ctr + 1; 
+            continue; 
+        }
+        s = s + ctr;
+        ctr = ctr + 1;
+    }
+    printf("Final sum (s) after continue: %d (Expected: 12)\n\n", s);
+    
+    // --- Test 5: Nested While Loops ---
+    // Outer loop (i) runs 2 times. Inner loop (j) runs 3 times. Total count: 6
+    printf("Test 5: Nested While Loops\n");
+    i = 0;
+    int count = 0;
+    while (i < 2) {
+        j = 0; // Inner loop initialization
+        while (j < 3) {
+            count = count + 1;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    printf("Final count: %d (Expected: 6)\n", count);
+    
+    return 0;
+}

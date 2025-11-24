@@ -1,0 +1,66 @@
+#include <stdio.h>
+
+int main() {
+    int ctr = 0;
+    int s = 0;  
+    
+    printf("--- Do-While Loop Feature Test ---\n");
+    
+    // Test 1: Simple Loop Execution
+    // Starts at ctr=0, runs the body, checks ctr < 5. Expected ctr: 5
+    printf("Test 1: Simple Loop\n");
+    do {
+        s = s + ctr;
+        ctr = ctr + 1;
+    } while (ctr < 5);
+    // Expected s: 0+1+2+3+4 = 10
+    printf("Final sum (s): %d\n", s);
+    printf("Final ctr: %d (Expected: 5)\n\n", ctr);
+    
+    // Test 2: Condition is initially FALSE (Must run once)
+    // ctr is 5. Loop runs once (body executes, s=15, ctr=6), then condition (6 < 5) is false.
+    printf("Test 2: Condition Initially False\n");
+    s = 10;
+    do {
+        s = s + ctr;
+        ctr = ctr + 1;
+    } while (ctr < 5);
+    // Expected s: 10 + 5 = 15
+    printf("Final sum (s): %d\n", s);
+    printf("Final ctr: %d (Expected: 6)\n\n", ctr);
+    
+    // Test 3: Loop with 'break' Statement
+    // Loop starts at ctr=0. Should break when ctr reaches 3.
+    printf("Test 3: Loop with BREAK\n");
+    s = 0;
+    ctr = 0;
+    do {
+        s = s + ctr;
+        if (ctr == 3) {
+            break; 
+        }
+        ctr = ctr + 1;
+    } while (ctr < 10);
+    // Expected s: 0+1+2+3 = 6
+    printf("Final sum (s): %d\n", s);
+    printf("Final ctr: %d (Expected: 3)\n\n", ctr);
+    
+    // Test 4: Loop with 'continue' Statement
+    // Loop runs from 1 to 5. Skips addition when ctr is 3.
+    printf("Test 4: Loop with CONTINUE\n");
+    s = 0;
+    ctr = 1;
+    do {
+        if (ctr == 3) {
+            ctr = ctr + 1;
+            continue;
+        }
+        s = s + ctr;
+        ctr = ctr + 1;
+    } while (ctr <= 5);
+    // Expected s: 1 + 2 + (skip 3) + 4 + 5 = 12
+    printf("Final sum (s): %d\n", s);
+    printf("Final ctr: %d (Expected: 6)\n", ctr);
+    
+    return 0;
+}

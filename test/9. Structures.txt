@@ -1,0 +1,31 @@
+#include <stdio.h>
+
+// Define a simple structure
+struct P {
+    int x;
+    int y;
+};
+
+int main() {
+    struct P p1;
+    
+    printf("--- Structure Feature Test ---\n");
+    
+    // Test 1: Simple Access and Assignment
+    printf("Test 1: Simple Access and Assignment\n");
+    p1.x = 5;
+    p1.y = 15;
+    printf("p1.x: %d (Expected: 5)\n", p1.x); 
+    printf("p1.y: %d (Expected: 15)\n\n", p1.y); 
+
+    // Test 2: Structure Assignment (Copy)
+    struct P p2;
+    p2 = p1;
+    
+    printf("Test 2: Structure Copy\n");
+    p2.x = 20; 
+    printf("p2.x: %d (Expected: 20)\n", p2.x); 
+    printf("p1.x: %d (Expected: 5)\n\n", p1.x); 
+
+    return 0;
+}

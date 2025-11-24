@@ -1,0 +1,72 @@
+#include <stdio.h>
+#include <stdbool.h>
+
+int main() {
+    // --- 1. Integer Arithmetic Precedence Test (BODMAS) ---
+
+    int a = 20;
+    int b = 5;
+    int c = 3;
+
+    // Equation: a * (b + 1) / c - 1 % c + 2 = 41
+    
+    printf("--- Integer Arithmetic Test ---\n");
+    printf("Test Vars: a=%d, b=%d, c=%d\n", a, b, c);
+    printf("Result of (a * (b + 1) / c - 1 %% c + 2): %d\n", a * (b + 1) / c - 1 % c + 2);
+    printf("Expected Integer Result: 41\n\n");
+
+    // --- 2. Float Arithmetic Precedence Test (BODMAS) ---
+
+    float fx = 10.0f;
+    float fy = 2.0f;
+    float fz = 3.0f;
+    
+    // Equation: (fx / fy) * (fz + 1.0f) - 0.5f + 1.0f = 20.5
+    
+    printf("--- Float Arithmetic Test ---\n");
+    printf("Test Vars: fx=%f, fy=%f, fz=%f\n", fx, fy, fz);
+    printf("Result of ((fx / fy) * (fz + 1.0f) - 0.5f + 1.0f): %f\n", (fx / fy) * (fz + 1.0f) - 0.5f + 1.0f);
+    printf("Expected Float Result: 20.500000\n\n");
+
+    // --- 3. Boolean Logical Operations Test ---
+
+    bool P = true;
+    bool Q = false;
+    int d = 10;
+    
+    // Complex Logical Expression: (P && !Q) || (d < 5) || (d >= 10 && P) = true (1)
+    
+    printf("--- Boolean Logical Test ---\n");
+    printf("Test Vars: P=%d, Q=%d, d=%d\n", P, Q, d);
+    printf("Result of ((P && !Q) || (d < 5) || (d >= 10 && P)): %d\n", (P && !Q) || (d < 5) || (d >= 10 && P));
+    printf("Expected Boolean Result: 1 (true)\n\n");
+
+    // --- 4. Type Casting and Mixed-Mode Arithmetic Test ---
+
+    int i_val = 10;
+    float f_val = 3.5f;
+    
+    printf("--- Type Casting Test ---\n");
+    
+    // Test 4.1: Implicit Conversion (Int -> Float)
+    // Expected: 2.857...
+    printf("Implicit Int -> Float (i_val / f_val): %f\n", i_val / f_val);
+    printf("Expected Result (approx): 2.857143\n\n");
+    
+    // Test 4.2: Explicit Casting (Float -> Int) - Truncation
+    // Expected: 3
+    printf("Explicit Float -> Int ((int)f_val): %d\n", (int)f_val);
+    printf("Expected Result: 3\n");
+
+    // Test 4.3: Explicit Casting (Int -> Float)
+    // Expected: 2.5
+    printf("Explicit Int -> Float ((float)i_val / 4.0f): %f\n", (float)i_val / 4.0f);
+    printf("Expected Result: 2.500000\n");
+
+    // Test 4.4: Complex Mixed-Mode Expression
+    // Expected: 40.5
+    printf("Complex Mixed-Mode Expression ((i_val + 1) * f_val + (int)(i_val / 4.0f)): %f\n", (i_val + 1) * f_val + (int)(i_val / 4.0f));
+    printf("Expected Result: 40.500000\n");
+
+    return 0;
+}

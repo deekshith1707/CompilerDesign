@@ -1,0 +1,36 @@
+#include <stdio.h>
+
+int main() {
+    int i;
+    float f;
+    char c;
+    
+    printf("--- Printf and Scanf Feature Test ---\n");
+    
+    // Test 1: Scanf Input
+    printf("Test 1: Scanf Input\n");
+    printf("Enter an integer, a float (e.g., 4.5), and a character (separated by spaces):\n");
+    
+    int scan_result = scanf("%d %f %c", &i, &f, &c); 
+
+    printf("Items successfully scanned: %d (Expected: 3)\n\n", scan_result);
+    
+    
+    // Test 2: Printf Output
+    printf("Test 2: Printf Output\n");
+    
+    printf("Integer (%%d): %d\n", i);
+    printf("Float (%%f): %f\n", f);
+    printf("Character (%%c): %c\n", c);
+    
+    // Test 3: Printf Output (Float Precision)
+    printf("\nTest 3: Float Precision\n");
+    
+    // Precision for float (Expected: 3.14)
+    printf("Precision float (%%.2f): %.2f\n", 3.14159);
+    
+    // Combining specifiers
+    printf("Combined: Char=%c, Int=%d, Float=%.1f\n", c, i, f); 
+    
+    return 0;
+}

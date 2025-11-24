@@ -1,0 +1,50 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(int ac, char* av[]) {
+
+    // Test 1: Argument Count Check
+    if (ac < 9) {
+        printf("Test 1: FAIL. Usage: %s <int1> <int2> <int3> <double1> <double2> <double3> <long1> <long2>\n", av[0]);
+        printf("Expected ac: 9 (program + 8 args)\n");
+        printf("Actual ac: %d\n", ac);
+        return 1;
+    }
+    printf("Test 1: PASS. Argument count is sufficient (ac=%d).\n\n", ac);
+
+    // Test 2: COMMAND-LINE INPUT CONVERSIONS
+    printf("Test 2: Input Conversions and Abs\n");
+
+    // Integers (atoi)
+    int i1 = atoi(av[1]);          // Expected: 10
+    int i2 = atoi(av[2]);          // Expected: -5
+    int i3 = atoi(av[3]);          // Expected: 12345
+
+    // Doubles (atof)
+    double d1 = atof(av[4]);       // Expected: 3.14
+    double d2 = atof(av[5]);       // Expected: -0.01
+    double d3 = atof(av[6]);       // Expected: 98.76
+
+    // Longs (atol)
+    long l1 = atol(av[7]);         // Expected: 100000000
+    long l2 = atol(av[8]);         // Expected: -200000000
+
+    // Absolute values (abs)
+    int a1 = abs(i1);              // Expected: 10
+    int a2 = abs(i2);              // Expected: 5
+
+    // Printing results with expected values
+    printf("Integers: %d, %d, %d\n", i1, i2, i3);
+    printf("Expected Integers: 10, -5, 12345\n");
+    
+    printf("Doubles: %lf, %lf, %lf\n", d1, d2, d3);
+    printf("Expected Doubles: 3.140000, -0.010000, 98.760000\n");
+
+    printf("Longs: %ld, %ld\n", l1, l2);
+    printf("Expected Longs: 100000000, -200000000\n");
+
+    printf("Absolute values: %d, %d\n", a1, a2);
+    printf("Expected Absolute values: 10, 5\n");
+
+    return 0;
+}

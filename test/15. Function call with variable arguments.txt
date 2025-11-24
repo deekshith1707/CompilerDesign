@@ -1,0 +1,62 @@
+#include <stdio.h>
+
+// Note: True variadic functions with ... syntax are not supported
+// This test demonstrates variable argument counts using function overloading concept
+
+// Sum functions with different argument counts (simulating variable arguments)
+int sum1(int a) {
+    return a;
+}
+
+int sum2(int a, int b) {
+    return a + b;
+}
+
+int sum3(int a, int b, int c) {
+    return a + b + c;
+}
+
+int sum4(int a, int b, int c, int d) {
+    return a + b + c + d;
+}
+
+int sum5(int a, int b, int c, int d, int e) {
+    return a + b + c + d + e;
+}
+
+int main() {
+    int res;
+    
+    printf("--- Variable Arguments Test (Simulated) ---\n");
+    printf("Note: Using multiple functions to simulate variable arguments\n\n");
+    
+    // Test 1: Single argument
+    printf("Test 1: Sum of 1 argument\n");
+    res = sum1(10);
+    printf("Result: %d (Expected: 10)\n\n", res);
+    
+    // Test 2: Two arguments
+    printf("Test 2: Sum of 2 arguments\n");
+    res = sum2(10, 20);
+    printf("Result: %d (Expected: 30)\n\n", res);
+    
+    // Test 3: Three arguments
+    printf("Test 3: Sum of 3 arguments\n");
+    res = sum3(10, 20, 30);
+    printf("Result: %d (Expected: 60)\n\n", res);
+    
+    // Test 4: Four arguments
+    printf("Test 4: Sum of 4 arguments\n");
+    res = sum4(10, 20, 30, 40);
+    printf("Result: %d (Expected: 100)\n\n", res);
+    
+    // Test 5: Different four arguments
+    printf("Test 5: Sum of 4 different arguments\n");
+    res = sum4(5, 10, 15, 20);
+    printf("Result: %d (Expected: 50)\n\n", res);
+    
+    printf("Note: True variadic functions (with ... syntax) not supported\n");
+    printf("Note: Functions with 5+ parameters may have issues\n");
+    
+    return 0;
+}

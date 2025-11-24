@@ -1,0 +1,81 @@
+#include <stdio.h>
+
+int main() {
+    int x = 15;
+    int y = 5;
+    int z = 0;
+    
+    printf("--- If-Else Feature Test ---\n");
+    printf("Initial Vars: x=%d, y=%d, z=%d\n\n", x, y, z);
+    
+    // --- Test 1: Simple If-Else ---
+    // Condition: x > y (15 > 5) -> True
+    printf("Test 1 (Simple If-Else): ");
+    if (x > y) {
+        printf("PASS: IF block executed\n"); // Expected: Prints this line
+        z = 10;
+    } else {
+        printf("FAIL: ELSE block executed\n");
+    }
+    printf("z after Test 1: %d (Expected: 10)\n\n", z); // Expected z=10
+    
+    // --- Test 2: If-Else with False condition ---
+    // Condition: y > x (5 > 15) -> False
+    printf("Test 2 (False condition): ");
+    if (y > x) {
+        printf("FAIL: IF block executed\n");
+        z = 20;
+    } else {
+        printf("PASS: ELSE block executed\n"); // Expected: Prints this line
+        z = 30;
+    }
+    printf("z after Test 2: %d (Expected: 30)\n\n", z); // Expected z=30
+    
+    // --- Test 3: If-Else If-Else Chain ---
+    // Condition 1: x == 5 (False)
+    // Condition 2: x < 10 (False)
+    // Final ELSE block executes
+    printf("Test 3 (Else If Chain): ");
+    if (x == 5) {
+        printf("FAIL: First IF executed\n");
+        z = 40;
+    } else if (x < 10) {
+        printf("FAIL: ELSE IF executed\n");
+        z = 50;
+    } else {
+        printf("PASS: Final ELSE executed\n"); // Expected: Prints this line
+        z = 60;
+    }
+    printf("z after Test 3: %d (Expected: 60)\n\n", z); // Expected z=60
+    
+    // --- Test 4: Nested If-Else with Logical Operators ---
+    // Outer IF: (x > 10 && y < 10) -> (true && true) -> True
+    printf("Test 4 (Nested If-Else): ");
+    if (x > 10 && y < 10) {
+        printf("PASS: Outer IF executed. "); // Expected: Prints this line
+        
+        // Inner IF: (z == 60 || y == 1) -> (true || false) -> True
+        if (z == 60 || y == 1) {
+            printf("PASS: Inner IF executed\n"); // Expected: Prints this line
+            z = 70;
+        } else {
+            printf("FAIL: Inner ELSE executed\n");
+        }
+    } else {
+        printf("FAIL: Outer ELSE executed\n");
+    }
+    printf("z after Test 4: %d (Expected: 70)\n\n", z); // Expected z=70
+    
+    // --- Test 5: Assignment within Conditional ---
+    // This checks if the compiler processes the assignment (z = 80) before checking the condition.
+    // Condition: (z = 80) is True (non-zero)
+    printf("Test 5 (Assignment in IF): ");
+    if (z = 80) {
+        printf("PASS: Assignment evaluated to True\n"); // Expected: Prints this line
+    } else {
+        printf("FAIL: Assignment evaluated to False\n");
+    }
+    printf("z after Test 5: %d (Expected: 80)\n\n", z); // Expected z=80
+    
+    return 0;
+}

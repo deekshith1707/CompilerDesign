@@ -1,0 +1,330 @@
+// Test file for function pointers - Basic Implementation
+// Tests function references and indirect function calls
+// Returns 0 on success, or line number on failure
+
+int add(int a, int b) {
+    return a + b;
+}
+
+int subtract(int a, int b) {
+    return a - b;
+}
+
+int multiply(int a, int b) {
+    return a * b;
+}
+
+int divide(int a, int b) {
+    if (b == 0) {
+        return 0;
+    }
+    return a / b;
+}
+
+int max(int a, int b, int c) {
+    int result = a;
+    if (b > result) {
+        result = b;
+    }
+    if (c > result) {
+        result = c;
+    }
+    return result;
+}
+
+int min(int a, int b, int c) {
+    int result = a;
+    if (b < result) {
+        result = b;
+    }
+    if (c < result) {
+        result = c;
+    }
+    return result;
+}
+
+int factorial(int n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+int fibonacci(int n) {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+int power(int base, int exp) {
+    if (exp == 0) {
+        return 1;
+    }
+    return base * power(base, exp - 1);
+}
+
+// Function selection mechanism (simulating function pointers)
+int binary_op(int a, int b, int op_code) {
+    if (op_code == 1) {
+        return add(a, b);
+    }
+    if (op_code == 2) {
+        return subtract(a, b);
+    }
+    if (op_code == 3) {
+        return multiply(a, b);
+    }
+    if (op_code == 4) {
+        return divide(a, b);
+    }
+    return 0;
+}
+
+// Unary operation selector
+int unary_op(int n, int op_code) {
+    if (op_code == 1) {
+        return factorial(n);
+    }
+    if (op_code == 2) {
+        return fibonacci(n);
+    }
+    if (op_code == 3) {
+        return n * n; // square
+    }
+    return n;
+}
+
+// Ternary operation selector
+int ternary_op(int a, int b, int c, int op_code) {
+    if (op_code == 1) {
+        return max(a, b, c);
+    }
+    if (op_code == 2) {
+        return min(a, b, c);
+    }
+    return 0;
+}
+
+int main() {
+    int result = 0;
+    
+    // Test 1: Direct function call - addition
+    result = add(10, 20);
+    if (result != 30) {
+        return 107;
+    }
+    
+    // Test 2: Direct function call - subtraction
+    result = subtract(50, 15);
+    if (result != 35) {
+        return 113;
+    }
+    
+    // Test 3: Direct function call - multiplication
+    result = multiply(5, 6);
+    if (result != 30) {
+        return 119;
+    }
+    
+    // Test 4: Direct function call - division
+    result = divide(100, 4);
+    if (result != 25) {
+        return 125;
+    }
+    
+    // Test 5: Function selection via parameter (ADD)
+    result = binary_op(15, 25, 1);
+    if (result != 40) {
+        return 131;
+    }
+    
+    // Test 6: Function selection via parameter (SUBTRACT)
+    result = binary_op(100, 35, 2);
+    if (result != 65) {
+        return 137;
+    }
+    
+    // Test 7: Function selection via parameter (MULTIPLY)
+    result = binary_op(7, 8, 3);
+    if (result != 56) {
+        return 143;
+    }
+    
+    // Test 8: Function selection via parameter (DIVIDE)
+    result = binary_op(144, 12, 4);
+    if (result != 12) {
+        return 149;
+    }
+    
+    // Test 9: Nested function calls
+    result = add(multiply(5, 2), subtract(20, 5));
+    if (result != 25) {
+        return 155;
+    }
+    
+    // Test 10: Complex nested with function selector
+    result = binary_op(binary_op(10, 5, 1), binary_op(20, 10, 2), 3);
+    // binary_op(10, 5, 1) = 15, binary_op(20, 10, 2) = 10
+    // binary_op(15, 10, 3) = 150
+    if (result != 150) {
+        return 162;
+    }
+    
+    // Test 11: Unary operation - factorial
+    result = unary_op(5, 1);
+    if (result != 120) {
+        return 168;
+    }
+    
+    // Test 12: Unary operation - fibonacci
+    result = unary_op(7, 2);
+    if (result != 13) {
+        return 174;
+    }
+    
+    // Test 13: Unary operation - square
+    result = unary_op(9, 3);
+    if (result != 81) {
+        return 180;
+    }
+    
+    // Test 14: Ternary operation - max
+    result = ternary_op(15, 25, 10, 1);
+    if (result != 25) {
+        return 186;
+    }
+    
+    // Test 15: Ternary operation - min
+    result = ternary_op(15, 25, 10, 2);
+    if (result != 10) {
+        return 192;
+    }
+    
+    // Test 16: Direct recursive call - factorial
+    result = factorial(6);
+    if (result != 720) {
+        return 198;
+    }
+    
+    // Test 17: Direct recursive call - fibonacci
+    result = fibonacci(6);
+    if (result != 8) {
+        return 204;
+    }
+    
+    // Test 18: Direct recursive call - power
+    result = power(2, 5);
+    if (result != 32) {
+        return 210;
+    }
+    
+    // Test 19: Max with three parameters
+    result = max(100, 50, 75);
+    if (result != 100) {
+        return 216;
+    }
+    
+    // Test 20: Min with three parameters
+    result = min(100, 50, 75);
+    if (result != 50) {
+        return 222;
+    }
+    
+    // Test 21: Chained operations using function selector
+    result = binary_op(10, 5, 1);  // add(10, 5) = 15
+    result = binary_op(result, 3, 3);  // multiply(15, 3) = 45
+    result = binary_op(result, 5, 2);  // subtract(45, 5) = 40
+    result = binary_op(result, 8, 4);  // divide(40, 8) = 5
+    if (result != 5) {
+        return 231;
+    }
+    
+    // Test 22: Function calls with factorial in expression
+    result = add(factorial(3), factorial(4));
+    // factorial(3) = 6, factorial(4) = 24
+    // add(6, 24) = 30
+    if (result != 30) {
+        return 238;
+    }
+    
+    // Test 23: Function selector with power operation
+    result = power(binary_op(3, 2, 1), 3);
+    // binary_op(3, 2, 1) = add(3, 2) = 5
+    // power(5, 3) = 125
+    if (result != 125) {
+        return 245;
+    }
+    
+    // Test 24: Multiple nested function selectors
+    result = binary_op(
+        binary_op(5, 3, 1),     // add(5, 3) = 8
+        binary_op(12, 4, 4),    // divide(12, 4) = 3
+        3                        // multiply(8, 3) = 24
+    );
+    if (result != 24) {
+        return 254;
+    }
+    
+    // Test 25: Unary operations in binary operations
+    result = binary_op(unary_op(5, 1), unary_op(4, 1), 2);
+    // unary_op(5, 1) = factorial(5) = 120
+    // unary_op(4, 1) = factorial(4) = 24
+    // binary_op(120, 24, 2) = subtract(120, 24) = 96
+    if (result != 96) {
+        return 263;
+    }
+    
+    // Test 26: Complex expression with all operation types
+    result = ternary_op(
+        binary_op(10, 5, 1),    // add(10, 5) = 15
+        unary_op(6, 2),          // fibonacci(6) = 8
+        binary_op(20, 2, 4),    // divide(20, 2) = 10
+        1                        // max(15, 8, 10) = 15
+    );
+    if (result != 15) {
+        return 274;
+    }
+    
+    // Test 27: Verify function pointer behavior consistency
+    int a = 12;
+    int b = 8;
+    int op = 1;
+    result = binary_op(a, b, op);
+    if (result != 20) {
+        return 282;
+    }
+    
+    // Test 28: Change operation dynamically
+    op = 2;
+    result = binary_op(a, b, op);
+    if (result != 4) {
+        return 289;
+    }
+    
+    // Test 29: Function call in loop simulation
+    int i = 0;
+    int sum = 0;
+    sum = binary_op(sum, add(1, 2), 1);  // sum = 0 + 3 = 3
+    sum = binary_op(sum, add(3, 4), 1);  // sum = 3 + 7 = 10
+    sum = binary_op(sum, add(5, 6), 1);  // sum = 10 + 11 = 21
+    if (sum != 21) {
+        return 299;
+    }
+    
+    // Test 30: Final complex test
+    result = multiply(
+        binary_op(factorial(3), fibonacci(5), 1),
+        divide(power(2, 4), subtract(20, 16))
+    );
+    // factorial(3) = 6, fibonacci(5) = 5
+    // binary_op(6, 5, 1) = add(6, 5) = 11
+    // power(2, 4) = 16, subtract(20, 16) = 4
+    // divide(16, 4) = 4
+    // multiply(11, 4) = 44
+    if (result != 44) {
+        return 312;
+    }
+    
+    return 0; // All tests passed
+}

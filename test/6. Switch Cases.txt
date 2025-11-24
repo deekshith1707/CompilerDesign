@@ -1,0 +1,87 @@
+#include <stdio.h>
+
+int main() {
+    int val = 2;
+    char op = '+'; 
+    int result = 0;
+    
+    printf("--- Switch Case Feature Test ---\n");
+    
+    // Test 1: Matching Integer Cases and Default
+    printf("Test 1: Integer Matching\n");
+    switch (val) {
+        case 1:
+            result = 10;
+            break;
+        case 2:
+            result = 20; 
+            break;
+        case 3:
+            result = 30;
+            break;
+        default:
+            result = 100;
+            break;
+    }
+    printf("Input val=2. Final result: %d (Expected: 20)\n\n", result);
+    
+    // Test 2: Matching Character Cases (using op = '+')
+    printf("Test 2: Character Matching\n");
+    switch (op) {
+        case '-':
+            result = 5;
+            break;
+        case '*':
+            result = 6;
+            break;
+        case '+':
+            result = 7;
+            break;
+        default:
+            result = 8;
+            break;
+    }
+    printf("Input op='+'. Final result: %d (Expected: 7)\n\n", result);
+
+    // Test 3: Fall-through (Missing Break)
+    // val is set to 2. It matches case 2, then executes the code for case 3 and default.
+    // result should go 50 -> 60 -> 70
+    printf("Test 3: Fall-through Behavior\n");
+    result = 0;
+    val = 2;
+    switch (val) {
+        case 1:
+            result = 40;
+            break;
+        case 2: // Match: Fall-through begins
+            result = 50;
+            // NO break here
+        case 3: // Executes due to fall-through
+            result = 60;
+            // NO break here
+        default: // Executes due to fall-through
+            result = 70;
+            break;
+    }
+    printf("Input val=2. Final result: %d (Expected: 70)\n\n", result);
+    
+    // Test 4: Default Case Execution
+    // Set val to 99 (no matching case label)
+    printf("Test 4: Default Execution\n");
+    result = 0;
+    val = 99;
+    switch (val) {
+        case 10:
+            result = 80;
+            break;
+        default:
+            result = 90;
+            break;
+        case 20:
+            result = 100;
+            break;
+    }
+    printf("Input val=99. Final result: %d (Expected: 90)\n", result);
+    
+    return 0;
+}

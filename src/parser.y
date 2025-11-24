@@ -31,6 +31,7 @@ char saved_declaration_type[128] = "int";  // Save type from declaration_specifi
 int loop_depth = 0;  // Track nesting depth of loops (for break/continue validation)
 int switch_depth = 0;  // Track nesting depth of switch statements (for break validation)
 int parsing_parameters = 0;  // Flag to indicate we're parsing function/function pointer parameters
+int parsing_expression_context = 0;  // Flag to indicate we're parsing inside expression (e.g., sizeof)
 
 // Structure to track goto statements for validation
 typedef struct {
@@ -38,7 +39,7 @@ typedef struct {
     int line_number;
 } GotoRef;
 
-GotoRef pending_gotos[100];  // Track up to 100 goto statements per function
+GotoRef pending_gotos[100]; 
 int pending_goto_count = 0;
 
 // Structure to store parameter information during parsing
@@ -49,7 +50,7 @@ typedef struct {
     int isReference;
 } ParamInfo;
 
-ParamInfo pending_params[32];  // Store up to 32 parameters
+ParamInfo pending_params[32];
 int pending_param_count = 0;
 
 // Global AST root, to be passed to the IR generator
@@ -69,13 +70,10 @@ const char* extractTypeFromSpecifiers(TreeNode* node);  // Forward declaration f
 int isLValue(TreeNode* node) {
     if (!node) return 0;
     
-    // ERROR B: Check if this is a typedef name being used as lvalue
     if (node->type == NODE_TYPE_NAME) {
-        // TYPE_NAME nodes represent typedef names - they are NOT lvalues
         return 0;
     }
     
-    // Variables, array accesses, and dereferenced pointers are lvalues
     if (node->type == NODE_IDENTIFIER) return 1;
     if (node->isLValue) return 1;
     if (node->type == NODE_POSTFIX_EXPRESSION && strcmp(node->value, "[]") == 0) return 1;
@@ -96,10 +94,8 @@ int isPointerType(const char* type) {
 char* stripReferenceType(const char* type) {
     if (!type) return NULL;
     
-    // Look for " &" in the type string
     const char* ref_pos = strstr(type, " &");
     if (ref_pos) {
-        // Create a copy without the " &" suffix
         size_t len = ref_pos - type;
         char* result = (char*)malloc(len + 1);
         strncpy(result, type, len);
@@ -107,7 +103,6 @@ char* stripReferenceType(const char* type) {
         return result;
     }
     
-    // Not a reference type, return a copy
     return strdup(type);
 }
 
@@ -125,7 +120,6 @@ int isReferenceNode(TreeNode* node) {
 int countPointerLevels(TreeNode* node) {
     if (!node) return 0;
     if (node->type == NODE_POINTER) {
-        // Count this pointer/reference and any nested pointers
         int count = 1;
         for (int i = 0; i < node->childCount; i++) {
             count += countPointerLevels(node->children[i]);
@@ -145,7 +139,7 @@ int countReferenceLevels(TreeNode* node) {
     for (int i = 0; i < node->childCount; i++) {
         count += countReferenceLevels(node->children[i]);
     }
-    return count;  // FIX: was returning 0 instead of count
+    return count; 
 }
 
 // Helper function to build full type string with pointers and references
@@ -196,8 +190,6 @@ const char* extractIdentifierName(TreeNode* node) {
 int isFunctionPointer(TreeNode* node) {
     if (!node) return 0;
     
-    // Function pointer pattern: MULTIPLY -> (eventual) parameter_type_list
-    // Check if this node is a pointer
     if (node->type == NODE_POINTER) {
         // Check if any descendant has a parameter list (indicating function pointer)
         return hasParameterListDescendant(node);
@@ -232,8 +224,6 @@ int hasParameterListDescendant(TreeNode* node) {
     return 0;
 }
 
-// Helper function to count array dimensions in a declarator
-// In function parameters, arrays decay to pointers, so each [] adds a pointer level
 int countArrayDimensions(TreeNode* node) {
     if (!node) return 0;
     
@@ -284,10 +274,9 @@ void extractParameterTypes(TreeNode* paramList, char* dest) {
                     // Check for pointers
                     int ptrCount = countPointerLevels(declarator);
                     for (int p = 0; p < ptrCount; p++) {
-                        // Check if it's a reference or pointer
                         if (isReferenceNode(declarator)) {
                             strcat(dest, " &");
-                            break;  // Only one reference allowed
+                            break;
                         } else {
                             strcat(dest, " *");
                         }
@@ -402,18 +391,10 @@ void processStructDeclaration(TreeNode* declNode, StructMember* members, int* me
         const char* memberType = extractTypeFromSpecifiers(specifiers);
         
         if (memberType) {
-            // DON'T resolve typedef here - it may not be available yet
-            // Typedef resolution will happen at member access time
             const char* actual_type = memberType;
             
-            // Second child: struct_declarator_list (the names)
             TreeNode* declaratorList = declNode->children[1];
             
-            // struct_declarator_list can be:
-            // 1. A single declarator (IDENTIFIER or array/pointer declarator)
-            // 2. Multiple declarators (first one + children are additional ones)
-            
-            // First, process the primary declarator (the node itself)
             const char* memberName = extractIdentifierName(declaratorList);
             if (memberName && *memberCount < maxMembers) {
                 strncpy(members[*memberCount].name, memberName, 127);
@@ -424,7 +405,6 @@ void processStructDeclaration(TreeNode* declNode, StructMember* members, int* me
                 if (hasArrayBrackets(declaratorList)) {
                     int dims[10] = {0};
                     int numDims = extractArrayDimensions(declaratorList, dims, 10);
-                    // Build type like "char[20]" or "int[10][20]"
                     strcpy(fullType, actual_type);
                     for (int d = 0; d < numDims; d++) {
                         char dimStr[32];
@@ -449,8 +429,6 @@ void processStructDeclaration(TreeNode* declNode, StructMember* members, int* me
                 (*memberCount)++;
             }
             
-            // Then, process any additional declarators in the list (siblings)
-            // But NOT if this is an array/pointer declarator (those children are part of the declarator structure)
             int isComplexDeclarator = (declaratorList->type == NODE_DIRECT_DECLARATOR && 
                                       declaratorList->value && strcmp(declaratorList->value, "array") == 0) ||
                                      (declaratorList->type == NODE_POINTER);
@@ -463,12 +441,10 @@ void processStructDeclaration(TreeNode* declNode, StructMember* members, int* me
                         strncpy(members[*memberCount].name, additionalName, 127);
                         members[*memberCount].name[127] = '\0';
                         
-                        // Check if it's an array and build the full type with dimensions
                         char fullType[128];
                         if (hasArrayBrackets(declarator)) {
                             int dims[10] = {0};
                             int numDims = extractArrayDimensions(declarator, dims, 10);
-                            // Build type like "char[20]" or "int[10][20]"
                             strcpy(fullType, actual_type);
                             for (int d = 0; d < numDims; d++) {
                                 char dimStr[32];
@@ -510,10 +486,8 @@ void parseStructDefinition(const char* structName, TreeNode* memberListNode) {
     StructMember members[MAX_STRUCT_MEMBERS];
     int memberCount = 0;
     
-    // Start processing from the root
     processStructDeclaration(memberListNode, members, &memberCount, MAX_STRUCT_MEMBERS);
     
-    // Insert the struct definition
     if (memberCount > 0) {
         insertStruct(structName, members, memberCount);
     }
@@ -526,10 +500,8 @@ void parseUnionDefinition(const char* unionName, TreeNode* memberListNode) {
     StructMember members[MAX_STRUCT_MEMBERS];
     int memberCount = 0;
     
-    // Start processing from the root (same as struct)
     processStructDeclaration(memberListNode, members, &memberCount, MAX_STRUCT_MEMBERS);
     
-    // Insert the union definition (size will be max of members)
     if (memberCount > 0) {
         insertUnion(unionName, members, memberCount);
     }
@@ -541,22 +513,18 @@ int extractArrayDimensions(TreeNode* node, int* dims, int maxDims) {
     
     int count = 0;
     
-    // Check if this is an array declarator node
     if (node->type == NODE_DIRECT_DECLARATOR && node->value && 
-        strcmp(node->value, "array") == 0 && node->childCount >= 2) {
-        // Second child contains the dimension
+        strcmp(node->value, "array") == 0 && node->childCount >= 2){
         TreeNode* dimNode = node->children[1];
         if (dimNode && dimNode->value) {
             if (count < maxDims) {
                 dims[count++] = atoi(dimNode->value);
             }
         }
-        // First child might be another array declarator
         if (node->children[0]) {
             count += extractArrayDimensions(node->children[0], &dims[count], maxDims - count);
         }
     } else {
-        // Recursively check children
         for (int i = 0; i < node->childCount && count < maxDims; i++) {
             count += extractArrayDimensions(node->children[i], &dims[count], maxDims - count);
         }
@@ -626,19 +594,15 @@ int countInitializerElements(TreeNode* initNode) {
     
     // Check if it's a string literal (for char arrays)
     if (initNode->type == NODE_STRING_LITERAL && initNode->value) {
-        // Count the string length including NUL terminator
-        // String value includes quotes, so subtract 2 and add 1 for NUL
         int len = strlen(initNode->value);
         if (len >= 2 && initNode->value[0] == '"' && initNode->value[len-1] == '"') {
-            return len - 2 + 1;  // -2 for quotes, +1 for NUL
+            return len - 2 + 1; 
         }
-        return len + 1;  // Fallback: add 1 for NUL
+        return len + 1;
     }
     
-    // Check if it's an initializer list
     if (initNode->type == NODE_INITIALIZER && initNode->value && 
         strcmp(initNode->value, "init_list") == 0) {
-        // Count the direct children (each is an initializer element)
         return initNode->childCount;
     }
     
@@ -750,7 +714,7 @@ program:
     translation_unit {
         $$ = createNode(NODE_PROGRAM, "program");
         addChild($$, $1);
-        ast_root = $$; // Set the global AST root
+        ast_root = $$;
     }
     ;
 
@@ -795,9 +759,7 @@ preprocessor_directive:
             insertExternalFunction("getchar", "int");
             insertExternalFunction("putchar", "int");
         }
-        // Check if this is #include <stdlib.h> and insert standard library functions
         if ($1 && $1->value && strstr($1->value, "stdlib.h")) {
-            // Insert common stdlib.h functions
             insertExternalFunction("atoi", "int");
             insertExternalFunction("atof", "double");
             insertExternalFunction("atol", "long");
@@ -825,15 +787,12 @@ preprocessor_directive:
 function_definition:
     declaration_specifiers declarator
     {
-        // Now we know it's a definition (has compound_statement coming)
-        // Extract function name
         const char* funcName = extractIdentifierName($2);
         if (funcName) {
             // Extract return type from declaration_specifiers
             char funcRetType[128];
             strcpy(funcRetType, currentType);
             
-            // Try to find the base type from declaration_specifiers
             if ($1 && $1->childCount > 0) {
                 for (int i = 0; i < $1->childCount; i++) {
                     TreeNode* spec = $1->children[i];
@@ -862,8 +821,8 @@ function_definition:
         }
         // Mark them as parameters
         markRecentSymbolsAsParameters(pending_param_count);
-        param_count_temp = pending_param_count;  // Update param_count_temp for IR generation
-        pending_param_count = 0;  // Reset for next function
+        param_count_temp = pending_param_count; 
+        pending_param_count = 0; 
         
         in_function_body = 1;
     }
@@ -874,7 +833,6 @@ function_definition:
         addChild($$, $2); // declarator (name)
         addChild($$, $4); // compound_statement (body)
         
-        // Validate all goto statements now that all labels are defined
         for (int i = 0; i < pending_goto_count; i++) {
             Symbol* label = lookupLabel(pending_gotos[i].label_name);
             if (!label) {
@@ -882,7 +840,7 @@ function_definition:
                           pending_gotos[i].label_name);
             }
         }
-        pending_goto_count = 0;  // Reset for next function
+        pending_goto_count = 0; 
         
         in_function_body = 0;
         param_count_temp = 0;
@@ -893,7 +851,6 @@ function_definition:
 
 declaration:
     declaration_specifiers SEMICOLON {
-        // ERROR C: Check for typedef with missing declarator
         if (in_typedef) {
             type_error(yylineno, "typedef declaration does not declare anything");
         }
@@ -905,7 +862,7 @@ declaration:
         has_const_before_ptr = 0;
         has_const_after_ptr = 0;
         recovering_from_error = 0;
-        pending_param_count = 0;  // Reset pending parameters (in case this was a function declaration)
+        pending_param_count = 0; 
     }
     | declaration_specifiers init_declarator_list SEMICOLON {
         $$ = createNode(NODE_DECLARATION, "declaration");
@@ -916,7 +873,7 @@ declaration:
         has_const_before_ptr = 0;
         has_const_after_ptr = 0;
         recovering_from_error = 0;
-        pending_param_count = 0;  // Reset pending parameters (in case this was a function declaration)
+        pending_param_count = 0; 
     }
     ;
 
@@ -924,12 +881,9 @@ declaration_specifiers:
     specifier {
         $$ = createNode(NODE_DECLARATION_SPECIFIERS, "decl_specs");
         addChild($$, $1);
-        // Don't overwrite function return type if we're inside parameter parsing
-        // parsing_function_decl will be set by function_definition rule
-        // Store the current type in the node's dataType field AND save it globally
         $$->dataType = strdup(currentType);
-        // Only save to saved_declaration_type if we're NOT parsing function pointer parameters
-        if (!parsing_parameters) {
+        
+        if (!parsing_parameters && !parsing_expression_context) {
             strncpy(saved_declaration_type, currentType, sizeof(saved_declaration_type) - 1);
             saved_declaration_type[sizeof(saved_declaration_type) - 1] = '\0';
         }
@@ -937,11 +891,11 @@ declaration_specifiers:
     | declaration_specifiers specifier {
         $$ = $1;
         addChild($$, $2);
-        // Update the dataType field with the current type AND save it globally
+
         if ($$->dataType) free($$->dataType);
         $$->dataType = strdup(currentType);
-        // Only save to saved_declaration_type if we're NOT parsing function pointer parameters
-        if (!parsing_parameters) {
+        
+        if (!parsing_parameters && !parsing_expression_context) {
             strncpy(saved_declaration_type, currentType, sizeof(saved_declaration_type) - 1);
             saved_declaration_type[sizeof(saved_declaration_type) - 1] = '\0';
         }
@@ -1417,16 +1371,14 @@ init_declarator:
                 free(init_decayed);
             }
             
-            // Always insert the variable into the symbol table
-            // The symbol table will handle duplicates within the same scope/block
             insertVariable(varName, fullType, isArray, arrayDims, numDims, ptrLevel, is_static, has_const_before_ptr, has_const_after_ptr, isRef);
             // Mark as function pointer if needed
             if (isFuncPtr && symCount > 0 && strcmp(symtab[symCount - 1].name, varName) == 0) {
                 strcpy(symtab[symCount - 1].kind, "function_pointer");
                 registerFunctionPointer(varName);  // Register for IR generation
             }
-            /* emit("ASSIGN", ...) REMOVED */
-        }        // Create an AST node for the initialization
+            
+        }        
         $$ = createNode(NODE_INITIALIZER, "=");
         addChild($$, $1); // The declarator (ID)
         addChild($$, $3); // The initializer (expression)
@@ -1475,8 +1427,7 @@ declarator:
 direct_declarator:
     IDENTIFIER { $$ = $1; }
     | TYPE_NAME { 
-        // Allow TYPE_NAME in declarator position for better error messages
-        // The semantic analyzer will catch if this is a redeclaration
+        
         $$ = $1; 
     }
     | LPAREN declarator RPAREN { $$ = $2; }
@@ -2495,10 +2446,11 @@ unary_expression:
         $$->dataType = strdup("int");
         /* $$->tacResult = ... REMOVED */
     }
-    | SIZEOF LPAREN type_name RPAREN {
+    | SIZEOF LPAREN { parsing_expression_context++; } type_name RPAREN {
         /* newTemp(), emit("ASSIGN") REMOVED */
+        parsing_expression_context--;  // Exit expression context
         $$ = createNode(NODE_UNARY_EXPRESSION, "sizeof");
-        addChild($$, $3); // Add the type_name node
+        addChild($$, $4); // Add the type_name node (shifted because of mid-rule action)
         $$->dataType = strdup("int");
         /* $$->tacResult = ... REMOVED */
     }
@@ -2596,7 +2548,6 @@ primary_expression:
         if ($1 && $1->value) {
             Symbol* sym = lookupSymbol($1->value);
             if (sym) {
-                // For references, strip the & to get the underlying type
                 // References should behave like the type they refer to in expressions
                 const char* actualType = sym->is_function ? sym->return_type : sym->type;
                 if (sym->is_reference) {
@@ -2658,9 +2609,9 @@ primary_expression:
         // String literal concatenation: "str1" "str2" becomes "str1str2"
         if ($1 && $1->dataType && strcmp($1->dataType, "char*") == 0 && $2) {
             // Both are string literals - concatenate them
-            size_t len1 = strlen($1->value) - 2;  // -2 to exclude quotes
-            size_t len2 = strlen($2->value) - 2;  // -2 to exclude quotes
-            char* concatenated = (char*)malloc(len1 + len2 + 3); // +3 for quotes and null
+            size_t len1 = strlen($1->value) - 2; 
+            size_t len2 = strlen($2->value) - 2; 
+            char* concatenated = (char*)malloc(len1 + len2 + 3);
             
             // Copy first string without closing quote
             strncpy(concatenated, $1->value, len1 + 1);
@@ -2677,7 +2628,6 @@ primary_expression:
             freeNode($1);
             freeNode($2);
         } else {
-            // Error case - should not happen if lexer is correct
             $$ = $1;
         }
     }

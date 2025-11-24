@@ -1,0 +1,31 @@
+#include <stdio.h>
+#include <stdbool.h>
+
+void trnsfm(int &x, int &y, bool &f) {
+    x = x + 10;
+    y = y - 3;
+    f = !f;
+}
+
+int main() {
+    // Use function pointer to call reference function (workaround for direct call limitation)
+    void (*func)(int &, int &, bool &) = trnsfm;
+    
+    int i1 = 5;
+    int i2 = 10;
+    bool b1 = false;
+    
+    printf("--- Reference Feature Test ---\n");
+
+    // Test 1: Pass-by-Reference through function pointer
+    printf("Test 1: Pass-by-Reference\n");
+    printf("Before call: i1=%d, i2=%d, b1=%d\n", i1, i2, b1);
+    printf("Expected Before call: i1=5, i2=10, b1=0\n");
+
+    func(i1, i2, b1);
+
+    printf("After call: i1=%d, i2=%d, b1=%d\n", i1, i2, b1);
+    printf("Expected After call: i1=15, i2=7, b1=1\n\n");
+    
+    return 0;
+}

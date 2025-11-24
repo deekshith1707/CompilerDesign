@@ -1,0 +1,61 @@
+#include <stdio.h>
+
+// Function 1: Simple Integer return and one Integer argument
+int add_one(int a) {
+    return a + 1;
+}
+
+// Function 2: Float return and two Float arguments
+float multiply_floats(float f1, float f2) {
+    return f1 * f2;
+}
+
+// Function 3: Multiple argument types and Integer return
+int complex_op(int i, float f, int j) {
+    return (i * j) + (int)f;
+}
+
+// Function 4: Nested calls
+int nested_calls(int x) {
+    // Expected: add_one(x) is 11. add_one(11) is 12.
+    return add_one(add_one(x));
+}
+
+int main() {
+    int i1 = 10;
+    float f1 = 2.5f;
+    float f2 = 4.0f;
+    int res_i;
+    float res_f;
+    
+    printf("--- Function Call Arguments Test ---\n");
+    
+    // Test 1: Simple Call and Return
+    printf("Test 1: Simple Call (int)\n");
+    res_i = add_one(i1); // Expected: 11
+    printf("Result of add_one(10): %d (Expected: 11)\n\n", res_i);
+    
+    // Test 2: Float Call and Return
+    printf("Test 2: Float Call\n");
+    res_f = multiply_floats(f1, f2); // Expected: 2.5 * 4.0 = 10.0
+    printf("Result of multiply_floats(2.5, 4.0): %f (Expected: 10.000000)\n\n", res_f);
+    
+    // Test 3: Multiple Mixed Arguments
+    printf("Test 3: Multiple Mixed Arguments\n");
+    // Arguments: 2, 3.5, 3
+    res_i = complex_op(2, 3.5f, 3); // Expected: (2 * 3) + (int)3.5 = 6 + 3 = 9
+    printf("Result of complex_op(2, 3.5, 3): %d (Expected: 9)\n\n", res_i);
+    
+    // Test 4: Expression as Argument
+    printf("Test 4: Expression as Argument\n");
+    // Argument: (5 + 3) = 8
+    res_i = add_one(5 + 3); // Expected: add_one(8) = 9
+    printf("Result of add_one(5 + 3): %d (Expected: 9)\n\n", res_i);
+    
+    // Test 5: Nested Function Calls
+    printf("Test 5: Nested Function Calls\n");
+    res_i = nested_calls(10); // Expected: 12
+    printf("Result of nested_calls(10): %d (Expected: 12)\n", res_i);
+    
+    return 0;
+}

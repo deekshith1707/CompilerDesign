@@ -1,0 +1,56 @@
+#include <stdio.h>
+
+int main() {
+    int i = 0;
+    int s = 0;
+    
+    printf("--- Jump Statements Test (goto, break, continue) ---\n");
+    
+    // Test 1: Simple GOTO
+    printf("Test 1: Simple GOTO\n");
+    i = 10;
+    
+    goto LABEL_GOTO; 
+    
+    i = 20; 
+    
+    LABEL_GOTO:
+    printf("i after GOTO: %d (Expected: 10)\n\n", i);
+    
+    // Test 2: GOTO for Error Flow
+    printf("Test 2: GOTO for Error Flow\n");
+    i = 0;
+    if (i == 0) {
+        goto ERROR_CLEANUP;
+    }
+    s = 500; 
+    
+    ERROR_CLEANUP:
+    printf("s after ERROR_CLEANUP: %d (Expected: 0)\n\n", s);
+    
+    // Test 3: BREAK in FOR Loop
+    printf("Test 3: BREAK in FOR Loop\n");
+    s = 0;
+    for (i = 0; i < 5; i++) {
+        if (i == 3) {
+            break; 
+        }
+        s = s + i;
+    }
+    printf("Sum (s) after BREAK: %d (Expected: 3)\n\n", s);
+    
+    // Test 4: CONTINUE in WHILE Loop
+    printf("Test 4: CONTINUE in WHILE Loop\n");
+    s = 0;
+    i = 0;
+    while (i < 5) {
+        i++; 
+        if (i == 3) {
+            continue; 
+        }
+        s = s + i;
+    }
+    printf("Sum (s) after CONTINUE: %d (Expected: 12)\n", s);
+    
+    return 0;
+}

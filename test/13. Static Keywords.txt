@@ -1,0 +1,44 @@
+#include <stdio.h>
+
+// Static Global Variable
+static int sg = 100;
+
+// Non-static Global Variable
+int g = 200;
+
+int static_local_test() {
+    static int sl = 0;
+    sl = sl + 1;
+    return sl;
+}
+
+void modify_global() {
+    g = g + 10;
+}
+
+void modify_static_global() {
+    sg = sg + 1;
+}
+
+int main() {
+    printf("--- Static Keyword Feature Test ---\n");
+
+    // Test 1: Static Local (Persistence)
+    printf("Test 1: Static Local (Persistence)\n");
+    printf("1st call: %d (Expected: 1)\n", static_local_test());
+    printf("2nd call: %d (Expected: 2)\n", static_local_test());
+    printf("3rd call: %d (Expected: 3)\n\n", static_local_test());
+    
+    // Test 2: Static Global Access
+    printf("Test 2: Static Global Access\n");
+    modify_static_global();
+    modify_static_global();
+    printf("sg after modification: %d (Expected: 102)\n\n", sg);
+    
+    // Test 3: Standard Global Access
+    printf("Test 3: Standard Global Access\n");
+    modify_global();
+    printf("g after modification: %d (Expected: 210)\n", g);
+    
+    return 0;
+}

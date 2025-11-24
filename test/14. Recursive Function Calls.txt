@@ -1,0 +1,45 @@
+#include <stdio.h>
+
+// Function 1: Factorial calculation (Standard recursion)
+// f(n) = n * f(n-1)
+int fact(int n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * fact(n - 1);
+}
+
+// Function 2: Fibonacci sequence (Multiple recursive calls)
+// fib(n) = fib(n-1) + fib(n-2)
+int fib(int n) {
+    if (n <= 1) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+int main() {
+    int n = 5;
+    int res_f; // Result for factorial
+    int res_i; // Result for integer (Fibonacci)
+    
+    printf("--- Recursive Function Call Test ---\n");
+    
+    // Test 1: Simple Recursion (Factorial)
+    printf("Test 1: Factorial\n");
+    res_f = fact(n); // fact(5) = 120
+    printf("Factorial of %d: %d (Expected: 120)\n\n", n, res_f);
+    
+    // Test 2: Recursion with Multiple Calls (Fibonacci)
+    printf("Test 2: Fibonacci\n");
+    n = 6;
+    res_i = fib(n); // fib(6): 0, 1, 1, 2, 3, 5, 8
+    printf("Fibonacci of %d: %d (Expected: 8)\n\n", n, res_i);
+    
+    // Test 3: Base Case Check
+    printf("Test 3: Base Case Check\n");
+    res_f = fact(1); // fact(1) = 1
+    printf("Factorial of 1: %d (Expected: 1)\n", res_f);
+    
+    return 0;
+}

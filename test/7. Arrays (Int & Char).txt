@@ -1,0 +1,65 @@
+#include <stdio.h>
+
+int main() {
+    // Test 1: Integer Array Initialization and Basic Access
+    int arr1[5] = {10, 20, 30, 40, 50}; // Initializer list
+    int sum = 0;
+    
+    printf("--- Array Feature Test (int & char) ---\n");
+    
+    printf("Test 1: Int Array Access & Sum\n");
+    // Expected access: arr1[2] = 30
+    printf("arr1[2]: %d\n", arr1[2]); 
+    
+    // Sum using simple indexing
+    sum = arr1[0] + arr1[4]; // 10 + 50 = 60
+    printf("arr1[0] + arr1[4]: %d (Expected: 60)\n\n", sum);
+    
+    // Test 2: Array Modification
+    // Modify the element at index 1 and 3
+    printf("Test 2: Array Modification\n");
+    arr1[1] = 25;
+    arr1[3] = 45;
+    // Expected value: arr1[1] = 25
+    printf("New arr1[1]: %d\n", arr1[1]); 
+    // Expected sum: 10 + 25 + 30 + 45 + 50 = 160
+    
+    // Test 3: Array Traversal (Looping)
+    printf("Test 3: Array Traversal (Loop)\n");
+    sum = 0;
+    int i;
+    for (i = 0; i < 5; i = i + 1) {
+        sum = sum + arr1[i];
+    }
+    printf("Sum after loop: %d (Expected: 160)\n\n", sum);
+    
+    // Test 4: Character Array (String) Initialization and Access
+    // Initialize a char array (C-style string)
+    char arr2[] = {'H', 'e', 'l', 'l', 'o', '\0'};
+    char c = arr2[0]; // 'H'
+    
+    printf("Test 4: Char Array Access\n");
+    // Expected: arr2[1] = 'e'
+    printf("arr2[1]: %c\n", arr2[1]);
+    
+    // Check first character
+    if (c == 'H') {
+        printf("First char check: PASS\n");
+    } else {
+        printf("First char check: FAIL\n");
+    }
+    
+    // Test 5: Char Array Modification
+    printf("Test 5: Char Array Modification\n");
+    arr2[4] = 'a'; // Change 'o' to 'a'
+    // Expected: arr2[4] = 'a'
+    printf("New arr2[4]: %c\n\n", arr2[4]);
+
+    // Test 6: Array size inference (Implicit sizing)
+    int arr3[] = {1, 2, 3}; // Size should be 3
+    printf("Test 6: Array Size Inference\n");
+    // Access the last element: arr3[2] = 3
+    printf("arr3[2]: %d (Expected: 3)\n", arr3[2]); 
+    
+    return 0;
+}
