@@ -26,20 +26,15 @@ echo "Generating IR and MIPS Assembly files..."
 echo "============================================"
 
 # Generate both IR and MIPS assembly files for all test cases
-for test_file in $(ls -1v ${TEST_DIR}/*.txt); do
+find "${TEST_DIR}" -name "*.txt" -type f | sort -V | while IFS= read -r test_file; do
     echo "--------------------------------------------"
     echo "Processing: ${test_file}"
     echo "--------------------------------------------"
     ./ir_generator "${test_file}" --generate-mips
-    
-    # Get base filename and copy output.s to test directory
-    base=$(basename "${test_file}" .txt)
-    cp output.s "${TEST_DIR}/${base}.s"
-    echo "Created: ${TEST_DIR}/${base}.s"
     echo ""
 done
 
 echo ""
 echo "============================================"
-echo "All .s files generated successfully!"
+echo "All .ir and .s files generated successfully!"
 echo "============================================"
