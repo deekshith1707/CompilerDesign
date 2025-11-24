@@ -744,6 +744,10 @@ void updateDescriptors(MIPSCodeGenerator* codegen, int regNum, const char* varNa
         codegen->regDescriptors[regNum].varCount++;
     }
     
+    // CRITICAL FIX: Mark register as dirty when a value is written to it
+    // This ensures the value is spilled before function calls or control flow changes
+    codegen->regDescriptors[regNum].isDirty = true;
+    
     // Update address descriptor - variable is now in this register
     int addrIdx = findOrCreateAddrDesc(codegen, varName);
     if (addrIdx >= 0) {
@@ -1780,6 +1784,13 @@ void translateLabel(MIPSCodeGenerator* codegen, Quadruple* quad, bool skipSpill)
             codegen->addrDescriptors[i].inRegister = -1;
         }
         
+        // CRITICAL FIX: Also clear ALL register descriptors after label
+        // Since we can reach this label from multiple paths, register contents are unreliable
+        // Force all variables to be reloaded from memory when needed
+        for (int r = REG_T0; r <= REG_T9; r++) {
+            clearRegisterDescriptor(codegen, r);
+        }
+        
         sanitizeLabelName(labelName, sanitized);
         sprintf(label, "%s:", sanitized);
         emitMIPS(codegen, label);
@@ -2494,6 +2505,16 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     }
     else {
         // Regular function call - generate jal
+        
+        // CRITICAL FIX: Spill all caller-saved registers before the call
+        // Function calls can clobber $t0-$t9, so we must save any live values
+        // This ensures values computed before the call are preserved
+        for (int r = REG_T0; r <= REG_T9; r++) {
+            if (codegen->regDescriptors[r].varCount > 0 && codegen->regDescriptors[r].isDirty) {
+                spillRegister(codegen, r);
+            }
+        }
+        
         // Add '_' prefix unless calling main (to avoid instruction name conflicts)
         char jalTarget[128];
         if (strcmp(funcName, "main") == 0) {
