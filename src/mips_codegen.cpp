@@ -1223,20 +1223,28 @@ void translateArithmetic(MIPSCodeGenerator* codegen, Quadruple* quad, int irInde
         int elementSize = getArrayElementInfo(quad->arg1, &isCharArray);
         pointerScale = elementSize;
     }
-    // Also check symbol table for regular ADD/SUB operations
+    // Also check for regular ADD/SUB operations that are actually pointer arithmetic
     else {
-        Symbol* sym = lookupSymbol(quad->arg1);
-        if (sym != NULL && (sym->ptr_level > 0 || sym->is_array)) {
+        // Use scope-independent lookup to check if arg1 is a pointer or array
+        bool arg1IsPtr = isPointerVariable(quad->arg1);
+        
+        // Also check if it's an array by searching symbol table without scope restrictions
+        bool arg1IsArr = false;
+        for (int i = 0; i < symCount; i++) {
+            if (strcmp(symtab[i].name, quad->arg1) == 0) {
+                // It's an array ONLY if is_array is true AND ptr_level is 0
+                // For pointer parameters (int* arr), ptr_level should be 1, so NOT an array
+                if (symtab[i].is_array && symtab[i].ptr_level == 0) {
+                    arg1IsArr = true;
+                    arg1IsArray = true;  // Remember if it's an array
+                }
+                break;
+            }
+        }
+        
+        if (arg1IsPtr || arg1IsArr) {
             isPointerArithmetic = true;
-            arg1IsArray = sym->is_array;  // Remember if it's an array
             // Determine element size based on pointer/array type
-            bool isCharArray = false;
-            int elementSize = getArrayElementInfo(quad->arg1, &isCharArray);
-            pointerScale = elementSize;  // 1 for char, 4 for int/float/pointer
-        } else if (strstr(quad->arg1, "ptr") != NULL || strstr(quad->arg1, "Ptr") != NULL) {
-            // Heuristic: variable name contains "ptr" - likely a pointer
-            // This catches variables like aptr, ptr1, fptr, cptr, etc.
-            isPointerArithmetic = true;
             bool isCharArray = false;
             int elementSize = getArrayElementInfo(quad->arg1, &isCharArray);
             pointerScale = elementSize;  // 1 for char, 4 for int/float/pointer
@@ -2975,8 +2983,16 @@ void translateArrayAddr(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex
     const char* resultVar = quad->result;
     
     // Check if this is a pointer dereference (ptr[i]) or array access (arr[i])
-    Symbol* arraySym = lookupSymbol(arrayName);
-    bool isPointerAccess = (arraySym != NULL && arraySym->ptr_level > 0 && !arraySym->is_array);
+    // CRITICAL FIX: Use scope-independent lookup, not lookupSymbol()
+    bool isPointerAccess = false;
+    for (int i = 0; i < symCount; i++) {
+        if (strcmp(symtab[i].name, arrayName) == 0) {
+            // It's pointer access if it has pointer level > 0 and is NOT a local array
+            // (A parameter like int* arr has ptr_level=1)
+            isPointerAccess = (symtab[i].ptr_level > 0 && !symtab[i].is_array);
+            break;
+        }
+    }
     
     // Get element size from symbol table
     bool isCharArray = false;
