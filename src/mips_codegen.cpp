@@ -1104,7 +1104,26 @@ void loadVariable(MIPSCodeGenerator* codegen, const char* varName, int regNum) {
     char location[128];
     getMemoryLocation(codegen, varName, location);
     
-    // Generate load instruction
+    // Check variable type to use appropriate load instruction
+    Symbol* sym = lookupSymbol(varName);
+    const char* varType = getVariableType(codegen, varName);
+    
+    // For char type, use lb (load byte)
+    if (sym && strcmp(sym->type, "char") == 0) {
+        sprintf(instr, "    lb %s, %s    # Load char %s", getRegisterName(regNum), location, varName);
+        emitMIPS(codegen, instr);
+        return;
+    }
+    
+    // For float type, load as word (float bits stored as integer)
+    // The bits will be correctly interpreted when used in float operations
+    if (sym && (strcmp(sym->type, "float") == 0 || strcmp(varType, "float") == 0)) {
+        sprintf(instr, "    lw %s, %s    # Load float %s", getRegisterName(regNum), location, varName);
+        emitMIPS(codegen, instr);
+        return;
+    }
+    
+    // Generate load instruction (default: lw for int and pointers)
     sprintf(instr, "    lw %s, %s", getRegisterName(regNum), location);
     emitMIPS(codegen, instr);
 }
@@ -1117,6 +1136,18 @@ void storeVariable(MIPSCodeGenerator* codegen, const char* varName, int regNum) 
     char location[128];
     
     getMemoryLocation(codegen, varName, location);
+    
+    // Check variable type to use appropriate store instruction
+    Symbol* sym = lookupSymbol(varName);
+    
+    // For char type, use sb (store byte)
+    if (sym && strcmp(sym->type, "char") == 0) {
+        sprintf(instr, "    sb %s, %s    # Store char %s", getRegisterName(regNum), location, varName);
+        emitMIPS(codegen, instr);
+        return;
+    }
+    
+    // Default: sw for int, float (as bits), and pointers
     sprintf(instr, "    sw %s, %s", getRegisterName(regNum), location);
     emitMIPS(codegen, instr);
 }
@@ -2697,9 +2728,15 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
                     i++;  // Move past '%'
                     char spec = formatStr[i];
                     
-                    // Skip precision specifiers like .1, .2
-                    while (spec == '.' || (spec >= '0' && spec <= '9')) {
+                    // Parse precision specifiers like .1, .2
+                    int precision = -1;  // -1 means default (6 for floats)
+                    if (spec == '.') {
                         i++;
+                        precision = 0;
+                        while (formatStr[i] >= '0' && formatStr[i] <= '9') {
+                            precision = precision * 10 + (formatStr[i] - '0');
+                            i++;
+                        }
                         spec = formatStr[i];
                     }
                     
@@ -2719,22 +2756,37 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
                     // Emit appropriate syscall based on format specifier
                     if (spec == 'd' || spec == 'i') {
                         sprintf(instr, "    li $v0, 1    # syscall 1: print_int");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
                     } else if (spec == 'f') {
-                        // Float support - move from integer register to float register and print
+                        // Float formatting with precision control (default 6 decimal places for %f)
+                        int prec = (precision == -1) ? 6 : precision;
+                        
+                        // Move value to float register
                         sprintf(instr, "    mtc1 $a0, $f12    # Move to float register");
                         emitMIPS(codegen, instr);
-                        sprintf(instr, "    li $v0, 2    # syscall 2: print_float");
+                        
+                        // Call helper to print float with specified precision
+                        sprintf(instr, "    li $t7, %d    # Precision", prec);
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    jal _print_float_precision");
                     } else if (spec == 'c') {
                         sprintf(instr, "    li $v0, 11   # syscall 11: print_char");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
                     } else if (spec == 's') {
                         sprintf(instr, "    li $v0, 4    # syscall 4: print_string");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
                     } else if (spec == 'p' || spec == 'x') {
                         sprintf(instr, "    li $v0, 1    # syscall 1: print_int (pointer as int)");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
                     } else {
                         sprintf(instr, "    li $v0, 1    # syscall 1: print_int (default)");
+                        emitMIPS(codegen, instr);
+                        emitMIPS(codegen, "    syscall");
                     }
-                    emitMIPS(codegen, instr);
-                    emitMIPS(codegen, "    syscall");
                     
                     argIndex++;
                 } else if (formatStr[i] == '%' && formatStr[i+1] == '%') {
@@ -4203,8 +4255,12 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
     else if (strcmp(quad->op, "ARRAY_ADDR") == 0) {
         translateArrayAddr(codegen, quad, irIndex);
     }
+    // LOAD_OFFSET - load from pointer with offset: result = *(ptr + offset)
+    else if (strcmp(quad->op, "LOAD_OFFSET") == 0) {
+        translateLoadOffset(codegen, quad, irIndex);
+    }
     // LOAD - load from reference: LOAD [ptr] result
-    else if (strncmp(quad->op, "LOAD", 4) == 0) {
+    else if (strcmp(quad->op, "LOAD") == 0) {
         // LOAD [x] t0 means t0 = *x (load value at address in x)
         // arg1 contains "[x]" - extract the variable name
         char ptrVar[128];
@@ -4239,8 +4295,20 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
             codegen->addrDescriptors[addrIdx].inRegister = regResult;
         }
     }
+    // DEREF - dereference operator (Phase 3)
+    else if (strcmp(quad->op, "DEREF") == 0 || strcmp(quad->op, "*") == 0) {
+        translateDeref(codegen, quad, irIndex);
+    }
+    // ASSIGN_DEREF - assign to dereferenced pointer (Phase 3)
+    else if (strcmp(quad->op, "ASSIGN_DEREF") == 0) {
+        translateAssignDeref(codegen, quad, irIndex);
+    }
+    // STORE_OFFSET - store to pointer with offset: *(ptr + offset) = value
+    else if (strcmp(quad->op, "STORE_OFFSET") == 0) {
+        translateStoreOffset(codegen, quad, irIndex);
+    }
     // STORE - store to reference: STORE value [ptr]
-    else if (strncmp(quad->op, "STORE", 5) == 0) {
+    else if (strcmp(quad->op, "STORE") == 0) {
         // STORE t1 [x] means *x = t1 (store value to address in x)
         // arg2 contains "[x]" - extract the variable name
         char ptrVar[128];
@@ -4265,22 +4333,6 @@ void translateInstruction(MIPSCodeGenerator* codegen, int irIndex) {
                 getRegisterName(regValue), getRegisterName(regPtr), 
                 ptrVar, quad->arg1);
         emitMIPS(codegen, instr);
-    }
-    // DEREF - dereference operator (Phase 3)
-    else if (strcmp(quad->op, "DEREF") == 0 || strcmp(quad->op, "*") == 0) {
-        translateDeref(codegen, quad, irIndex);
-    }
-    // ASSIGN_DEREF - assign to dereferenced pointer (Phase 3)
-    else if (strcmp(quad->op, "ASSIGN_DEREF") == 0) {
-        translateAssignDeref(codegen, quad, irIndex);
-    }
-    // LOAD_OFFSET - load from pointer with offset: result = *(ptr + offset)
-    else if (strcmp(quad->op, "LOAD_OFFSET") == 0) {
-        translateLoadOffset(codegen, quad, irIndex);
-    }
-    // STORE_OFFSET - store to pointer with offset: *(ptr + offset) = value
-    else if (strcmp(quad->op, "STORE_OFFSET") == 0) {
-        translateStoreOffset(codegen, quad, irIndex);
     }
     // CAST operations - proper type conversion
     // CAST_int_to_float, CAST_float_to_int, etc. require actual conversion instructions
@@ -4544,19 +4596,106 @@ void generateTextSection(MIPSCodeGenerator* codegen) {
     emitMIPS(codegen, "_abs_done:");
     emitMIPS(codegen, "    jr $ra");
     emitMIPS(codegen, "");
+    
+    // _print_float_precision - Print float with specific decimal precision
+    // Input: $f12 = float value, $t7 = precision (number of decimal places)
+    // Output: none (prints to stdout)
+    emitMIPS(codegen, "_print_float_precision:");
+    emitMIPS(codegen, "    addiu $sp, $sp, -12");
+    emitMIPS(codegen, "    sw $ra, 0($sp)");
+    emitMIPS(codegen, "    sw $s0, 4($sp)");
+    emitMIPS(codegen, "    sw $s1, 8($sp)");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    move $s1, $t7      # Save precision");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Check if negative");
+    emitMIPS(codegen, "    li.s $f4, 0.0");
+    emitMIPS(codegen, "    c.lt.s $f12, $f4");
+    emitMIPS(codegen, "    bc1f _pfp_positive");
+    emitMIPS(codegen, "    nop");
+    emitMIPS(codegen, "    # Print minus sign");
+    emitMIPS(codegen, "    li $a0, 45         # '-'");
+    emitMIPS(codegen, "    li $v0, 11");
+    emitMIPS(codegen, "    syscall");
+    emitMIPS(codegen, "    # Make positive");
+    emitMIPS(codegen, "    neg.s $f12, $f12");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "_pfp_positive:");
+    emitMIPS(codegen, "    # Get integer part");
+    emitMIPS(codegen, "    cvt.w.s $f4, $f12  # Convert to int (truncate)");
+    emitMIPS(codegen, "    mfc1 $a0, $f4      # Move to integer register");
+    emitMIPS(codegen, "    move $s0, $a0      # Save integer part");
+    emitMIPS(codegen, "    li $v0, 1          # Print integer");
+    emitMIPS(codegen, "    syscall");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Print decimal point");
+    emitMIPS(codegen, "    li $a0, 46         # '.'");
+    emitMIPS(codegen, "    li $v0, 11");
+    emitMIPS(codegen, "    syscall");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Get fractional part");
+    emitMIPS(codegen, "    cvt.s.w $f4, $f4   # Convert int back to float");
+    emitMIPS(codegen, "    sub.s $f12, $f12, $f4  # frac = original - integer");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Calculate 10^precision");
+    emitMIPS(codegen, "    li $t0, 1          # multiplier = 1");
+    emitMIPS(codegen, "    li $t1, 0          # counter = 0");
+    emitMIPS(codegen, "_pfp_mult_loop:");
+    emitMIPS(codegen, "    bge $t1, $s1, _pfp_mult_done");
+    emitMIPS(codegen, "    mul $t0, $t0, 10");
+    emitMIPS(codegen, "    addi $t1, $t1, 1");
+    emitMIPS(codegen, "    j _pfp_mult_loop");
+    emitMIPS(codegen, "_pfp_mult_done:");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Multiply fractional part by 10^precision");
+    emitMIPS(codegen, "    mtc1 $t0, $f4");
+    emitMIPS(codegen, "    cvt.s.w $f4, $f4");
+    emitMIPS(codegen, "    mul.s $f12, $f12, $f4");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Add 0.5 for rounding");
+    emitMIPS(codegen, "    li.s $f4, 0.5");
+    emitMIPS(codegen, "    add.s $f12, $f12, $f4");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Convert to integer");
+    emitMIPS(codegen, "    cvt.w.s $f12, $f12");
+    emitMIPS(codegen, "    mfc1 $s0, $f12     # fractional digits");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "    # Print fractional part with leading zeros");
+    emitMIPS(codegen, "    div $t0, $t0, 10   # divisor = 10^(precision-1)");
+    emitMIPS(codegen, "_pfp_lead_zero_loop:");
+    emitMIPS(codegen, "    beqz $t0, _pfp_print_done  # if divisor == 0, done");
+    emitMIPS(codegen, "    bge $s0, $t0, _pfp_print_digits  # if value >= divisor, print");
+    emitMIPS(codegen, "    # Print leading zero");
+    emitMIPS(codegen, "    li $a0, 48         # '0'");
+    emitMIPS(codegen, "    li $v0, 11");
+    emitMIPS(codegen, "    syscall");
+    emitMIPS(codegen, "    div $t0, $t0, 10");
+    emitMIPS(codegen, "    j _pfp_lead_zero_loop");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "_pfp_print_digits:");
+    emitMIPS(codegen, "    # Print remaining digits");
+    emitMIPS(codegen, "    move $a0, $s0");
+    emitMIPS(codegen, "    li $v0, 1");
+    emitMIPS(codegen, "    syscall");
+    emitMIPS(codegen, "");
+    emitMIPS(codegen, "_pfp_print_done:");
+    emitMIPS(codegen, "    lw $ra, 0($sp)");
+    emitMIPS(codegen, "    lw $s0, 4($sp)");
+    emitMIPS(codegen, "    lw $s1, 8($sp)");
+    emitMIPS(codegen, "    addiu $sp, $sp, 12");
+    emitMIPS(codegen, "    jr $ra");
+    emitMIPS(codegen, "");
 }
 
 /**
  * Main entry point for MIPS code generation
  */
-void generateMIPSCode(MIPSCodeGenerator* codegen) {
+void generateMIPSCode(MIPSCodeGenerator* codegen, const char* outputFilename) {
     // Open output file
-    char filename[256];
-    sprintf(filename, "output.s");
-    codegen->outputFile = fopen(filename, "w");
+    codegen->outputFile = fopen(outputFilename, "w");
     
     if (!codegen->outputFile) {
-        fprintf(stderr, "Error: Cannot create output file %s\n", filename);
+        fprintf(stderr, "Error: Cannot create output file %s\n", outputFilename);
         return;
     }
     
@@ -4574,7 +4713,7 @@ void generateMIPSCode(MIPSCodeGenerator* codegen) {
 /**
  * Main entry point for testing Phase 2
  */
-void testMIPSCodeGeneration() {
+void testMIPSCodeGeneration(const char* outputFilename) {
     // First, run basic block analysis (needed for next-use info)
     analyzeIR();
     
@@ -4599,9 +4738,9 @@ void testMIPSCodeGeneration() {
     codegen->funcCount = activationRecordCount;
     
     // Generate MIPS code
-    generateMIPSCode(codegen);
+    generateMIPSCode(codegen, outputFilename);
     
-    printf("MIPS assembly generated: output.s\n");
+    printf("MIPS assembly generated: %s\n", outputFilename);
     
     // Free memory
     free(codegen);

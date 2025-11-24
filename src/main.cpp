@@ -85,7 +85,14 @@ int main(int argc, char **argv) {
             
             // Generate MIPS assembly code if requested
             if (generateMIPS) {
-                testMIPSCodeGeneration();
+                // Generate .s filename from input file (same pattern as .ir)
+                string asmFile;
+                if (lastDot != string::npos) {
+                    asmFile = inputFile.substr(0, lastDot) + ".s";
+                } else {
+                    asmFile = inputFile + ".s";
+                }
+                testMIPSCodeGeneration(asmFile.c_str());
             }
         } else {
             cout << "\n=== PARSING SUCCEEDED BUT NO AST WAS GENERATED ===" << endl;

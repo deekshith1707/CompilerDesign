@@ -168,7 +168,7 @@ void generateMIPS(const char* irFilename, const char* outputFilename);
 /**
  * Generate MIPS code for entire IR
  */
-void generateMIPSCode(MIPSCodeGenerator* codegen);
+void generateMIPSCode(MIPSCodeGenerator* codegen, const char* outputFilename);
 
 // ============================================================================
 // Phase 1: Runtime Environment (Lectures 32-33)
@@ -192,7 +192,7 @@ void testActivationRecords();
 /**
  * Test MIPS code generation (called from main.cpp)
  */
-void testMIPSCodeGeneration();
+void testMIPSCodeGeneration(const char* outputFilename);
 
 /**
  * Calculate frame size for a function
