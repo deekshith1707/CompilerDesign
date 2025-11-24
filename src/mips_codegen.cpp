@@ -275,11 +275,10 @@ int countTemporariesInFunction(int funcStart, int funcEnd) {
 int calculateFrameSize(const char* funcName, int funcStart, int funcEnd) {
     int frameSize = 8;  // Start with $ra (4) + $fp (4)
     
-    // Count parameters (first 4 go in registers, rest on stack)
+    // Count parameters - ALL parameters need stack space since we save them in prologue
+    // Even the first 4 (passed in $a0-$a3) are saved to stack for recursive calls
     int paramCount = getParameterCount(funcName);
-    if (paramCount > 4) {
-        frameSize += (paramCount - 4) * 4;
-    }
+    frameSize += paramCount * 4;
     
     // Count local variables
     int localCount = countLocalsInFunction(funcName);
@@ -288,6 +287,11 @@ int calculateFrameSize(const char* funcName, int funcStart, int funcEnd) {
     // Count temporaries
     int tempCount = countTemporariesInFunction(funcStart, funcEnd);
     frameSize += tempCount * 4;
+    
+    // CRITICAL FIX: Add extra space for register spills during code generation
+    // Gotos, branches, and function calls may spill up to 10 $t registers
+    // Add 40 bytes (10 registers * 4 bytes) to prevent stack overflow
+    frameSize += 40;
     
     // Align to 8-byte boundary (MIPS convention)
     if (frameSize % 8 != 0) {
@@ -1047,9 +1051,91 @@ void storeVariable(MIPSCodeGenerator* codegen, const char* varName, int regNum) 
  * Returns register number (REG_T0 to REG_T9)
  */
 int getReg(MIPSCodeGenerator* codegen, const char* varName, int irIndex) {
+    char instr[256];
+    
     // Skip if varName is empty or a constant
     if (varName == NULL || strlen(varName) == 0) {
         return REG_T0;  // Default register
+    }
+    
+    // CRITICAL FIX: Check if this variable is an ARRAY
+    // In C, when an array name is used in an expression, it decays to a pointer to its first element
+    // So we need to load the ADDRESS, not a value from memory
+    bool isArray = false;
+    
+    // First check symbol table for is_array flag (most reliable)
+    for (int i = 0; i < symCount; i++) {
+        if (strcmp(symtab[i].name, varName) == 0) {
+            // Check if it's in current function scope (or global if no current function)
+            bool inScope = false;
+            if (codegen->currentFunction == NULL) {
+                // Global scope
+                inScope = (strcmp(symtab[i].function_scope, "") == 0 || 
+                          strcmp(symtab[i].function_scope, "global") == 0);
+            } else {
+                // Local scope
+                inScope = (strcmp(symtab[i].function_scope, codegen->currentFunction->funcName) == 0);
+            }
+            
+            if (inScope && symtab[i].is_array && symtab[i].ptr_level == 0) {
+                isArray = true;
+                break;
+            }
+        }
+    }
+    
+    // If it's an array, we need to compute its ADDRESS, not load a value
+    if (isArray) {
+        // Find an empty register or reuse if already computed
+        for (int r = REG_T0; r <= REG_T9; r++) {
+            // Check if we already have this array's address in a register
+            for (int v = 0; v < codegen->regDescriptors[r].varCount; v++) {
+                if (strcmp(codegen->regDescriptors[r].varNames[v], varName) == 0) {
+                    return r;  // Already have the address!
+                }
+            }
+        }
+        
+        // Find empty register or spill one
+        int targetReg = REG_T0;
+        for (int r = REG_T0; r <= REG_T9; r++) {
+            if (codegen->regDescriptors[r].varCount == 0) {
+                targetReg = r;
+                break;
+            }
+        }
+        
+        if (codegen->regDescriptors[targetReg].varCount > 0) {
+            // Must spill
+            spillRegister(codegen, targetReg);
+        }
+        
+        // Compute array base address: addiu reg, $fp, offset
+        char location[128];
+        getMemoryLocation(codegen, varName, location);
+        
+        // Parse offset from location string like "-24($fp)"
+        int offset = 0;
+        if (strstr(location, "($fp)") != NULL) {
+            sscanf(location, "%d($fp)", &offset);
+            sprintf(instr, "    addiu %s, $fp, %d    # Load address of array %s", 
+                    getRegisterName(targetReg), offset, varName);
+            emitMIPS(codegen, instr);
+        } else {
+            // Global array - use la
+            sprintf(instr, "    la %s, %s    # Load address of global array %s", 
+                    getRegisterName(targetReg), varName, varName);
+            emitMIPS(codegen, instr);
+        }
+        
+        // CRITICAL: Do NOT update descriptors with the array variable name!
+        // The register holds the array's ADDRESS, not the array data itself
+        // If we associate the register with "arr", it will try to spill back to arr's location
+        // which would overwrite the array data with its own address!
+        // Instead, just mark the register as in use but don't track it
+        // (This makes the address computation ephemeral - used once then discarded)
+        
+        return targetReg;
     }
     
     if (isConstantValue(varName)) {
@@ -1805,10 +1891,11 @@ void translateGoto(MIPSCodeGenerator* codegen, Quadruple* quad) {
     char instr[128];
     char sanitized[128];
     
-    // CRITICAL FIX: Spill all registers before jumping
-    // This ensures all pending changes are saved to memory
+    // CRITICAL FIX: Spill only DIRTY registers before jumping
+    // Clean registers are already saved and don't need re-spilling
+    // This prevents exceeding frame size with unnecessary spills
     for (int r = REG_T0; r <= REG_T9; r++) {
-        if (codegen->regDescriptors[r].varCount > 0) {
+        if (codegen->regDescriptors[r].varCount > 0 && codegen->regDescriptors[r].isDirty) {
             spillRegister(codegen, r);
         }
     }
@@ -1853,10 +1940,11 @@ void translateConditionalBranch(MIPSCodeGenerator* codegen, Quadruple* quad, int
     // Get register for condition variable
     int regCond = getReg(codegen, quad->arg1, irIndex);
     
-    // CRITICAL FIX: Spill all registers before branching
-    // This ensures all pending changes are saved to memory
+    // CRITICAL FIX: Spill only DIRTY registers before branching
+    // Clean registers are already saved and don't need re-spilling
+    // This prevents exceeding frame size with unnecessary spills
     for (int r = REG_T0; r <= REG_T9; r++) {
-        if (codegen->regDescriptors[r].varCount > 0 && r != regCond) {
+        if (codegen->regDescriptors[r].varCount > 0 && codegen->regDescriptors[r].isDirty && r != regCond) {
             spillRegister(codegen, r);
         }
     }
@@ -2093,6 +2181,52 @@ void translateParam(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
                 isIOCall = true;
             }
             break;
+        }
+    }
+    
+    // CRITICAL FIX: For the FIRST parameter (index 0), spill all caller-saved registers
+    // This must happen BEFORE any parameters are set up to avoid overwriting memory
+    // that parameters reference (e.g., &a where 'a' is at -12($fp))
+    // HOWEVER: Don't spill registers that hold parameter VALUES that are about to be passed!
+    if (codegen->currentParamCount == 0 && !isIOCall) {
+        // Build a set of parameter variable names for this call
+        // Look ahead to find all PARAM instructions before the next CALL
+        char paramVars[10][128];  // Up to 10 parameters
+        int paramVarCount = 0;
+        
+        for (int i = irIndex; i < codegen->irCount && i < irIndex + 20; i++) {
+            if (strcmp(codegen->IR[i].op, "PARAM") == 0 || strcmp(codegen->IR[i].op, "param") == 0) {
+                if (paramVarCount < 10) {
+                    strncpy(paramVars[paramVarCount], codegen->IR[i].arg1, 127);
+                    paramVars[paramVarCount][127] = '\0';
+                    paramVarCount++;
+                }
+            } else if (strcmp(codegen->IR[i].op, "CALL") == 0 || strcmp(codegen->IR[i].op, "call") == 0) {
+                break;  // Stop at CALL
+            }
+        }
+        
+        // Spill all dirty caller-saved registers EXCEPT those holding parameter values
+        for (int r = REG_T0; r <= REG_T9; r++) {
+            if (codegen->regDescriptors[r].varCount > 0 && codegen->regDescriptors[r].isDirty) {
+                // Check if this register holds any parameter variable
+                bool holdsParam = false;
+                for (int v = 0; v < codegen->regDescriptors[r].varCount; v++) {
+                    const char* varInReg = codegen->regDescriptors[r].varNames[v];
+                    for (int p = 0; p < paramVarCount; p++) {
+                        if (strcmp(varInReg, paramVars[p]) == 0) {
+                            holdsParam = true;
+                            break;
+                        }
+                    }
+                    if (holdsParam) break;
+                }
+                
+                // Only spill if this register doesn't hold a parameter value
+                if (!holdsParam) {
+                    spillRegister(codegen, r);
+                }
+            }
         }
     }
     
@@ -2506,14 +2640,9 @@ void translateCall(MIPSCodeGenerator* codegen, Quadruple* quad, int irIndex) {
     else {
         // Regular function call - generate jal
         
-        // CRITICAL FIX: Spill all caller-saved registers before the call
-        // Function calls can clobber $t0-$t9, so we must save any live values
-        // This ensures values computed before the call are preserved
-        for (int r = REG_T0; r <= REG_T9; r++) {
-            if (codegen->regDescriptors[r].varCount > 0 && codegen->regDescriptors[r].isDirty) {
-                spillRegister(codegen, r);
-            }
-        }
+        // NOTE: Register spilling is now done in translateParam (before parameter setup)
+        // This prevents the spilling from overwriting memory locations that parameters reference
+        // (e.g., when passing &a, we don't want to overwrite 'a' after computing its address)
         
         // Add '_' prefix unless calling main (to avoid instruction name conflicts)
         char jalTarget[128];
@@ -2658,8 +2787,44 @@ void translateArrayAccess(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
     const char* indexVar = quad->arg2;
     const char* resultVar = quad->result;
     
-    // Check if this is a pointer dereference (ptr[i]) or array access (arr[i])
-    bool isPointerAccess = isPointerVariable(arrayName);
+    // CRITICAL FIX: Check if this is a pointer or array in CURRENT SCOPE first
+    // The global isPointerVariable() can return wrong results when there are
+    // variables with the same name in different scopes (e.g., parameter vs local)
+    bool isPointerAccess = false;
+    bool foundInCurrentScope = false;
+    int varOffset = 0;
+    
+    // First, check in current function's activation record
+    if (codegen->currentFunction != NULL) {
+        for (int v = 0; v < codegen->currentFunction->varCount; v++) {
+            if (strcmp(codegen->currentFunction->variables[v].varName, arrayName) == 0) {
+                // Found in current scope - get the offset
+                foundInCurrentScope = true;
+                varOffset = codegen->currentFunction->variables[v].offset;
+                
+                // Now find the symbol table entry with matching name AND scope
+                // Use the offset to disambiguate between parameter and local
+                for (int i = 0; i < symCount; i++) {
+                    if (strcmp(symtab[i].name, arrayName) == 0) {
+                        // Check if this symbol is in the current function's scope
+                        // Parameters have positive/small negative offsets, locals have larger negative
+                        // The activation record stores the correct offset for THIS variable
+                        // So we use the is_array flag from the first matching symbol in THIS function
+                        if (strcmp(symtab[i].function_scope, codegen->currentFunction->funcName) == 0) {
+                            isPointerAccess = (symtab[i].ptr_level > 0 && !symtab[i].is_array);
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    
+    // If not found in current scope, use global lookup
+    if (!foundInCurrentScope) {
+        isPointerAccess = isPointerVariable(arrayName);
+    }
     
     // Get actual element size from symbol table
     bool isCharArray = false;
@@ -3157,6 +3322,19 @@ void translateAssignDeref(MIPSCodeGenerator* codegen, Quadruple* quad, int irInd
         valueReg = getReg(codegen, valueVar, irIndex);
         sprintf(instr, "    sw %s, 0(%s)", getRegisterName(valueReg), getRegisterName(ptrReg));
         emitMIPS(codegen, instr);
+    }
+    
+    // CRITICAL FIX: After storing through a pointer, we don't know which variable was modified
+    // due to pointer aliasing (the pointer could point to any variable)
+    // Therefore, we must invalidate ALL register descriptors to force subsequent loads
+    // to read fresh values from memory. This is conservative but correct.
+    // Similar to what we do after scanf (which also modifies memory through pointers)
+    for (int r = REG_T0; r <= REG_T9; r++) {
+        clearRegisterDescriptor(codegen, r);
+    }
+    // Also invalidate address descriptors - variables are no longer in registers
+    for (int i = 0; i < codegen->addrDescCount; i++) {
+        codegen->addrDescriptors[i].inRegister = -1;
     }
 }
 
